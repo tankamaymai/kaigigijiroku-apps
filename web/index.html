@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>議事録メーカー | Minutes Maker</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700&family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- ヘッダー -->
+        <header class="header">
+            <div class="logo">
+                <span class="logo-icon">📝</span>
+                <h1>Minutes Maker</h1>
+            </div>
+            <p class="tagline">音声から議事録を自動生成</p>
+        </header>
+
+        <!-- メインコンテンツ -->
+        <main class="main-content">
+            <!-- 左パネル: 設定 -->
+            <aside class="sidebar">
+                <div class="card settings-card">
+                    <h2 class="card-title">
+                        <span class="icon">⚙️</span>
+                        設定
+                    </h2>
+                    
+                    <div class="form-group">
+                        <label for="api-key">OpenAI API Key</label>
+                        <div class="input-with-icon">
+                            <input type="password" id="api-key" placeholder="sk-proj-..." />
+                            <button class="icon-btn toggle-visibility" title="表示切替">👁️</button>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="whisper-model">Whisperモデル</label>
+                            <select id="whisper-model">
+                                <option value="tiny">tiny (最速)</option>
+                                <option value="base">base</option>
+                                <option value="small">small</option>
+                                <option value="medium" selected>medium (推奨)</option>
+                                <option value="large">large (高精度)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="gpt-model">GPTモデル</label>
+                            <select id="gpt-model">
+                                <option value="gpt-4o-mini" selected>gpt-4o-mini</option>
+                                <option value="gpt-4o">gpt-4o</option>
+                                <option value="gpt-4-turbo">gpt-4-turbo</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <button class="btn btn-secondary save-settings">
+                        <span class="icon">💾</span>
+                        設定を保存
+                    </button>
+                </div>
+
+                <!-- テンプレート選択 -->
+                <div class="card template-card">
+                    <h2 class="card-title">
+                        <span class="icon">📋</span>
+                        テンプレート
+                    </h2>
+                    
+                    <div class="template-list">
+                        <!-- テンプレートは動的に読み込まれます -->
+                        <div class="template-item" style="opacity: 0.5;">
+                            <div class="template-icon">⏳</div>
+                            <div class="template-info">
+                                <h3>読み込み中...</h3>
+                                <p>テンプレートを取得しています</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <a href="/template-manager" class="btn btn-ghost add-template">
+                        <span class="icon">➕</span>
+                        テンプレート追加
+                    </a>
+                </div>
+            </aside>
+
+            <!-- 中央パネル: メイン操作 -->
+            <section class="main-panel">
+                <!-- アップロードエリア -->
+                <div class="card upload-card">
+                    <div class="upload-zone" id="upload-zone">
+                        <div class="upload-content">
+                            <div class="upload-icon">🎙️</div>
+                            <h3>音声ファイルをドロップ</h3>
+                            <p>または<span class="browse-link">ファイルを選択</span></p>
+                            <input type="file" id="audio-file" accept=".m4a,.mp3,.wav,.mp4,.webm,.ogg,.flac" hidden />
+                        </div>
+                        <div class="file-info hidden" id="file-info">
+                            <div class="file-icon">🎵</div>
+                            <div class="file-details">
+                                <span class="file-name" id="file-name">audio.m4a</span>
+                                <span class="file-size" id="file-size">12.4 MB</span>
+                            </div>
+                            <button class="icon-btn remove-file" title="削除">✕</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 実行ボタン -->
+                <button class="btn btn-primary run-btn" id="run-btn" disabled>
+                    <span class="btn-icon">🚀</span>
+                    <span class="btn-text">ワンクリックで議事録作成</span>
+                    <div class="btn-glow"></div>
+                </button>
+
+                <!-- プログレス表示 -->
+                <div class="card progress-card hidden" id="progress-card">
+                    <div class="progress-header">
+                        <h3 id="progress-title">処理中...</h3>
+                        <span class="progress-percent" id="progress-percent">0%</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progress-fill"></div>
+                    </div>
+                    <div class="progress-steps">
+                        <div class="step" id="step-1">
+                            <div class="step-icon">🎙️</div>
+                            <span>文字起こし</span>
+                        </div>
+                        <div class="step" id="step-2">
+                            <div class="step-icon">🤖</div>
+                            <span>AI要約</span>
+                        </div>
+                        <div class="step" id="step-3">
+                            <div class="step-icon">📊</div>
+                            <span>Excel生成</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 結果表示 -->
+                <div class="card result-card hidden" id="result-card">
+                    <div class="result-header">
+                        <div class="result-icon success">✅</div>
+                        <h3>議事録作成完了！</h3>
+                    </div>
+                    
+                    <!-- 文字起こし結果 -->
+                    <div class="result-section">
+                        <div class="result-section-header" onclick="toggleSection('transcript-section')">
+                            <h4>🎙️ 文字起こし結果</h4>
+                            <span class="toggle-icon">▼</span>
+                        </div>
+                        <div class="result-section-content" id="transcript-section">
+                            <pre id="transcript-text" style="white-space: pre-wrap; font-size: 0.85rem; max-height: 200px; overflow-y: auto; background: var(--bg-primary); padding: 15px; border-radius: 8px;"></pre>
+                        </div>
+                    </div>
+                    
+                    <!-- AI要約結果 -->
+                    <div class="result-section">
+                        <div class="result-section-header" onclick="toggleSection('summary-section')">
+                            <h4>🤖 AI要約結果</h4>
+                            <span class="toggle-icon">▼</span>
+                        </div>
+                        <div class="result-section-content" id="summary-section">
+                            <div id="summary-content" style="font-size: 0.9rem;"></div>
+                        </div>
+                    </div>
+                    
+                    <!-- ファイル情報 -->
+                    <div class="result-file" style="margin-top: 20px;">
+                        <div class="file-preview">
+                            <span class="excel-icon">📊</span>
+                            <div class="file-info">
+                                <span class="file-name" id="result-filename">所属長会議_meeting_20260108.xlsx</span>
+                                <span class="file-path" id="result-path">output/</span>
+                            </div>
+                        </div>
+                        <div class="result-actions">
+                            <button class="btn btn-secondary" id="download-btn">
+                                <span class="icon">⬇️</span>
+                                ダウンロード
+                            </button>
+                            <button class="btn btn-ghost" id="open-folder-btn">
+                                <span class="icon">📁</span>
+                                フォルダを開く
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <script>
+                    function toggleSection(sectionId) {
+                        const section = document.getElementById(sectionId);
+                        const header = section.previousElementSibling;
+                        const icon = header.querySelector('.toggle-icon');
+                        
+                        if (section.style.display === 'none') {
+                            section.style.display = 'block';
+                            icon.textContent = '▼';
+                        } else {
+                            section.style.display = 'none';
+                            icon.textContent = '▶';
+                        }
+                    }
+                </script>
+            </section>
+
+            <!-- 右パネル: ログ -->
+            <aside class="log-panel">
+                <div class="card log-card">
+                    <div class="log-header">
+                        <h2 class="card-title">
+                            <span class="icon">📜</span>
+                            処理ログ
+                        </h2>
+                        <button class="icon-btn clear-log" title="クリア">🗑️</button>
+                    </div>
+                    <div class="log-content" id="log-content">
+                        <div class="log-entry info">
+                            <span class="log-time">--:--:--</span>
+                            <span class="log-message">システム準備完了</span>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+        </main>
+
+        <!-- フッター -->
+        <footer class="footer">
+            <span>© 2026 Minutes Maker</span>
+            <span class="separator">|</span>
+            <span class="version">v2.0.0</span>
+        </footer>
+    </div>
+
+    <script src="static/app.js"></script>
+</body>
+</html>

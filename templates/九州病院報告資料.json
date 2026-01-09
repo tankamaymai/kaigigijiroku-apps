@@ -1,0 +1,77 @@
+{
+  "name": "九州病院報告資料",
+  "excel_template": "excel_templates/所属長会議まとめ　.xlsx",
+  "sheet": "原本",
+  "sections": [
+    {
+      "key": "field_2559",
+      "label": "九州病院報告資料",
+      "cell": "B1",
+      "row": 1,
+      "col": 2
+    },
+    {
+      "key": "field_9379",
+      "label": "日時",
+      "cell": "B3",
+      "row": 3,
+      "col": 2
+    },
+    {
+      "key": "field_2320",
+      "label": "新小文字",
+      "cell": "D4",
+      "row": 4,
+      "col": 4
+    },
+    {
+      "key": "field_9390",
+      "label": "福岡和白",
+      "cell": "D5",
+      "row": 5,
+      "col": 4
+    },
+    {
+      "key": "field_9482",
+      "label": "新行橋",
+      "cell": "D6",
+      "row": 6,
+      "col": 4
+    },
+    {
+      "key": "field_0028",
+      "label": "新水巻",
+      "cell": "D7",
+      "row": 7,
+      "col": 4
+    },
+    {
+      "key": "field_0600",
+      "label": "新武雄",
+      "cell": "D8",
+      "row": 8,
+      "col": 4
+    },
+    {
+      "key": "field_2379",
+      "label": "香椎",
+      "cell": "D9",
+      "row": 9,
+      "col": 4
+    },
+    {
+      "key": "field_5124",
+      "label": "下関",
+      "cell": "D10",
+      "row": 10,
+      "col": 4
+    }
+  ],
+  "chatgpt_prompt": {
+    "style_rules": [
+      "重複や雑談は除外",
+      "箇条書き",
+      "決定事項・課題・次アクションがあれば必ず含める"
+    ]
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "name": "九州病院報告資料-v2",
+  "excel_template": "excel_templates/所属長会議まとめ　.xlsx",
+  "sheet": "原本",
+  "sections": [
+    {
+      "key": "datetime",
+      "label": "日時",
+      "cell": "B3"
+    },
+    {
+      "key": "shinkomonji",
+      "label": "新小文字",
+      "cell": "C4",
+      "prefix": "【新小文字】\n"
+    },
+    {
+      "key": "fukuokawajiro",
+      "label": "福岡和白",
+      "cell": "C5",
+      "prefix": "【福岡和白】\n"
+    },
+    {
+      "key": "shinyukuhashi",
+      "label": "新行橋",
+      "cell": "C6",
+      "prefix": "【新行橋】\n"
+    },
+    {
+      "key": "shinmizumaki",
+      "label": "新水巻",
+      "cell": "C7",
+      "prefix": "【新水巻】\n"
+    },
+    {
+      "key": "shintakeo",
+      "label": "新武雄",
+      "cell": "C8",
+      "prefix": "【新武雄】\n"
+    },
+    {
+      "key": "kashii",
+      "label": "香椎",
+      "cell": "C9",
+      "prefix": "【香椎】\n"
+    },
+    {
+      "key": "shimonoseki",
+      "label": "下関",
+      "cell": "C10",
+      "prefix": "【下関】\n"
+    }
+  ],
+  "chatgpt_prompt": {
+    "style_rules": [
+      "重複や雑談は除外",
+      "箇条書き",
+      "決定事項・課題・次アクションがあれば必ず含める"
+    ]
+  }
+}

@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>テンプレート管理 | Minutes Maker</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700&family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="static/style.css">
+    <style>
+        .template-manager {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .back-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--accent-primary);
+            text-decoration: none;
+            margin-bottom: 20px;
+        }
+        
+        .back-link:hover {
+            text-decoration: underline;
+        }
+        
+        .step-indicator {
+            display: flex;
+            justify-content: center;
+            gap: 40px;
+            margin-bottom: 40px;
+        }
+        
+        .step-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+            opacity: 0.4;
+        }
+        
+        .step-item.active {
+            opacity: 1;
+        }
+        
+        .step-item.completed {
+            opacity: 1;
+        }
+        
+        .step-number {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: var(--bg-secondary);
+            border: 2px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+        }
+        
+        .step-item.active .step-number {
+            border-color: var(--accent-primary);
+            background: var(--accent-primary);
+            color: var(--bg-primary);
+        }
+        
+        .step-item.completed .step-number {
+            border-color: var(--accent-success);
+            background: var(--accent-success);
+            color: var(--bg-primary);
+        }
+        
+        .step-content {
+            display: none;
+        }
+        
+        .step-content.active {
+            display: block;
+        }
+        
+        .excel-preview {
+            background: var(--bg-secondary);
+            border-radius: var(--radius-md);
+            padding: 20px;
+            margin: 20px 0;
+            overflow-x: auto;
+        }
+        
+        .excel-grid {
+            display: grid;
+            gap: 1px;
+            background: var(--border-color);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+        }
+        
+        .excel-cell {
+            background: var(--bg-card);
+            padding: 8px 12px;
+            min-width: 100px;
+            font-size: 0.85rem;
+        }
+        
+        .excel-cell.header {
+            background: var(--bg-secondary);
+            font-weight: 500;
+            color: var(--accent-primary);
+        }
+        
+        .excel-cell.selectable {
+            cursor: pointer;
+            transition: var(--transition-fast);
+        }
+        
+        .excel-cell.selectable:hover {
+            background: rgba(0, 245, 212, 0.1);
+        }
+        
+        .excel-cell.selected {
+            background: rgba(0, 245, 212, 0.2);
+            border: 2px solid var(--accent-primary);
+        }
+        
+        .section-list {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            margin: 20px 0;
+        }
+        
+        .section-item {
+            display: grid;
+            grid-template-columns: 1fr 1fr 100px auto;
+            gap: 15px;
+            align-items: center;
+            background: var(--bg-secondary);
+            padding: 15px;
+            border-radius: var(--radius-sm);
+        }
+        
+        .section-item input {
+            width: 100%;
+        }
+        
+        .cell-badge {
+            background: var(--accent-primary);
+            color: var(--bg-primary);
+            padding: 5px 10px;
+            border-radius: var(--radius-sm);
+            font-family: monospace;
+            font-weight: bold;
+        }
+        
+        .add-section-btn {
+            width: 100%;
+            padding: 15px;
+            border: 2px dashed var(--border-color);
+            background: transparent;
+            color: var(--text-secondary);
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: var(--transition-fast);
+        }
+        
+        .add-section-btn:hover {
+            border-color: var(--accent-primary);
+            color: var(--accent-primary);
+        }
+        
+        .style-rules {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .style-rule {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        
+        .style-rule input {
+            flex: 1;
+        }
+        
+        .preview-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 20px;
+            margin: 20px 0;
+        }
+        
+        .preview-section {
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        
+        .preview-section:last-child {
+            margin-bottom: 0;
+            padding-bottom: 0;
+            border-bottom: none;
+        }
+        
+        .preview-label {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-bottom: 5px;
+        }
+        
+        .preview-value {
+            font-size: 1rem;
+            color: var(--text-primary);
+        }
+        
+        .btn-group {
+            display: flex;
+            gap: 15px;
+            margin-top: 30px;
+        }
+        
+        .success-message {
+            text-align: center;
+            padding: 40px;
+        }
+        
+        .success-icon {
+            font-size: 4rem;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="template-manager">
+        <a href="/" class="back-link">← メインページに戻る</a>
+        
+        <header class="header">
+            <div class="logo">
+                <span class="logo-icon">📋</span>
+                <h1>テンプレート管理</h1>
+            </div>
+            <p class="tagline">Excelテンプレートをアップロードして議事録フォーマットを設定</p>
+        </header>
+        
+        <!-- ステップインジケーター -->
+        <div class="step-indicator">
+            <div class="step-item active" data-step="1">
+                <div class="step-number">1</div>
+                <span>Excelアップロード</span>
+            </div>
+            <div class="step-item" data-step="2">
+                <div class="step-number">2</div>
+                <span>フィールド設定</span>
+            </div>
+            <div class="step-item" data-step="3">
+                <div class="step-number">3</div>
+                <span>確認・保存</span>
+            </div>
+        </div>
+        
+        <!-- Step 1: Excelアップロード -->
+        <div class="step-content active" id="step-1">
+            <div class="card">
+                <h2 class="card-title">
+                    <span class="icon">📤</span>
+                    Excelテンプレートをアップロード
+                </h2>
+                
+                <div class="upload-zone" id="excel-upload-zone">
+                    <div class="upload-content">
+                        <div class="upload-icon">📊</div>
+                        <h3>Excelファイルをドロップ</h3>
+                        <p>または<span class="browse-link">ファイルを選択</span></p>
+                        <input type="file" id="excel-file" accept=".xlsx,.xls" hidden />
+                    </div>
+                </div>
+                
+                <p style="margin-top: 15px; color: var(--text-muted); font-size: 0.9rem;">
+                    💡 ヒント: 議事録として使用したいExcelファイルをそのままアップロードしてください。
+                    フォーマットは完全に保持されます。
+                </p>
+            </div>
+        </div>
+        
+        <!-- Step 2: フィールド設定 -->
+        <div class="step-content" id="step-2">
+            <div class="card">
+                <h2 class="card-title">
+                    <span class="icon">✏️</span>
+                    入力フィールドを設定
+                </h2>
+                
+                <p style="margin-bottom: 20px;">
+                    AIが入力する項目を設定してください。各項目に対応するセル位置を指定します。
+                </p>
+                
+                <div class="form-group">
+                    <label for="template-name">テンプレート名</label>
+                    <input type="text" id="template-name" placeholder="例: 所属長会議" />
+                </div>
+                
+                <h3 style="margin: 25px 0 15px;">入力フィールド</h3>
+                
+                <div class="section-list" id="section-list">
+                    <!-- 動的に追加される -->
+                </div>
+                
+                <button class="add-section-btn" id="add-section-btn">
+                    ➕ フィールドを追加
+                </button>
+                
+                <h3 style="margin: 30px 0 15px;">スタイルルール（AIへの指示）</h3>
+                
+                <div class="style-rules" id="style-rules">
+                    <div class="style-rule">
+                        <input type="text" value="重複や雑談は除外" />
+                        <button class="icon-btn remove-rule">✕</button>
+                    </div>
+                    <div class="style-rule">
+                        <input type="text" value="箇条書き" />
+                        <button class="icon-btn remove-rule">✕</button>
+                    </div>
+                    <div class="style-rule">
+                        <input type="text" value="決定事項・課題・次アクションがあれば必ず含める" />
+                        <button class="icon-btn remove-rule">✕</button>
+                    </div>
+                </div>
+                
+                <button class="btn btn-ghost" id="add-rule-btn" style="margin-top: 10px;">
+                    ➕ ルールを追加
+                </button>
+                
+                <div class="btn-group">
+                    <button class="btn btn-secondary" id="back-to-step-1">← 戻る</button>
+                    <button class="btn btn-primary" id="go-to-step-3">次へ →</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Step 3: 確認・保存 -->
+        <div class="step-content" id="step-3">
+            <div class="card">
+                <h2 class="card-title">
+                    <span class="icon">✅</span>
+                    設定の確認
+                </h2>
+                
+                <div class="preview-card">
+                    <h3 id="preview-name">テンプレート名</h3>
+                    <p style="color: var(--text-muted); margin-bottom: 20px;" id="preview-excel">Excel: </p>
+                    
+                    <h4 style="margin-bottom: 15px;">入力フィールド</h4>
+                    <div id="preview-sections">
+                        <!-- 動的に追加 -->
+                    </div>
+                    
+                    <h4 style="margin: 20px 0 15px;">スタイルルール</h4>
+                    <ul id="preview-rules" style="padding-left: 20px; color: var(--text-secondary);">
+                        <!-- 動的に追加 -->
+                    </ul>
+                </div>
+                
+                <div class="btn-group">
+                    <button class="btn btn-secondary" id="back-to-step-2">← 戻る</button>
+                    <button class="btn btn-primary" id="save-template">💾 テンプレートを保存</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 完了画面 -->
+        <div class="step-content" id="step-complete">
+            <div class="card">
+                <div class="success-message">
+                    <div class="success-icon">🎉</div>
+                    <h2>テンプレートを保存しました！</h2>
+                    <p style="color: var(--text-secondary); margin: 20px 0;">
+                        新しいテンプレートがメインページで選択できるようになりました。
+                    </p>
+                    <div class="btn-group" style="justify-content: center;">
+                        <a href="/" class="btn btn-primary">メインページへ</a>
+                        <button class="btn btn-secondary" onclick="location.reload()">別のテンプレートを追加</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // 状態管理
+        const state = {
+            currentStep: 1,
+            excelFilename: '',
+            analysis: null,
+            sections: [],
+            templateName: '',
+            styleRules: []
+        };
+        
+        // DOM要素
+        const elements = {
+            excelUploadZone: document.getElementById('excel-upload-zone'),
+            excelFileInput: document.getElementById('excel-file'),
+            templateName: document.getElementById('template-name'),
+            sectionList: document.getElementById('section-list'),
+            styleRules: document.getElementById('style-rules')
+        };
+        
+        // ステップ切り替え
+        function goToStep(step) {
+            state.currentStep = step;
+            
+            // ステップインジケーター更新
+            document.querySelectorAll('.step-item').forEach((item, index) => {
+                item.classList.remove('active', 'completed');
+                if (index + 1 < step) {
+                    item.classList.add('completed');
+                } else if (index + 1 === step) {
+                    item.classList.add('active');
+                }
+            });
+            
+            // コンテンツ切り替え
+            document.querySelectorAll('.step-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            
+            const stepId = step === 4 ? 'step-complete' : `step-${step}`;
+            document.getElementById(stepId).classList.add('active');
+        }
+        
+        // Excelアップロード
+        function setupExcelUpload() {
+            const zone = elements.excelUploadZone;
+            const input = elements.excelFileInput;
+            
+            zone.addEventListener('click', () => input.click());
+            
+            zone.querySelector('.browse-link').addEventListener('click', (e) => {
+                e.stopPropagation();
+                input.click();
+            });
+            
+            input.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    uploadExcel(e.target.files[0]);
+                }
+            });
+            
+            zone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                zone.classList.add('dragover');
+            });
+            
+            zone.addEventListener('dragleave', () => {
+                zone.classList.remove('dragover');
+            });
+            
+            zone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                zone.classList.remove('dragover');
+                if (e.dataTransfer.files.length > 0) {
+                    uploadExcel(e.dataTransfer.files[0]);
+                }
+            });
+        }
+        
+        async function uploadExcel(file) {
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            try {
+                const response = await fetch('/api/templates/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail);
+                }
+                
+                const result = await response.json();
+                state.excelFilename = result.filename;
+                state.analysis = result.analysis;
+                state.templateName = result.analysis.name;
+                
+                // 推測されたセクションを設定
+                state.sections = result.analysis.suggested_sections.slice(0, 10); // 最大10個
+                
+                // Step 2へ
+                elements.templateName.value = state.templateName;
+                renderSections();
+                goToStep(2);
+                
+            } catch (error) {
+                alert('エラー: ' + error.message);
+            }
+        }
+        
+        // セクションリストをレンダリング
+        function renderSections() {
+            elements.sectionList.innerHTML = state.sections.map((section, index) => `
+                <div class="section-item" data-index="${index}">
+                    <input type="text" class="section-label" value="${section.label}" placeholder="ラベル名" />
+                    <input type="text" class="section-key" value="${section.key}" placeholder="キー（英数字）" />
+                    <span class="cell-badge">${section.cell}</span>
+                    <button class="icon-btn remove-section" title="削除">✕</button>
+                </div>
+            `).join('');
+            
+            // 削除ボタンのイベント
+            document.querySelectorAll('.remove-section').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const index = parseInt(e.target.closest('.section-item').dataset.index);
+                    state.sections.splice(index, 1);
+                    renderSections();
+                });
+            });
+            
+            // 入力変更のイベント
+            document.querySelectorAll('.section-item input').forEach(input => {
+                input.addEventListener('change', updateSectionsFromInputs);
+            });
+        }
+        
+        function updateSectionsFromInputs() {
+            document.querySelectorAll('.section-item').forEach((item, index) => {
+                state.sections[index] = {
+                    ...state.sections[index],
+                    label: item.querySelector('.section-label').value,
+                    key: item.querySelector('.section-key').value
+                };
+            });
+        }
+        
+        // セクション追加
+        document.getElementById('add-section-btn').addEventListener('click', () => {
+            const cell = prompt('セル位置を入力してください（例: B5）');
+            if (cell) {
+                state.sections.push({
+                    key: `field_${state.sections.length + 1}`,
+                    label: '新規フィールド',
+                    cell: cell.toUpperCase()
+                });
+                renderSections();
+            }
+        });
+        
+        // スタイルルール追加
+        document.getElementById('add-rule-btn').addEventListener('click', () => {
+            const container = document.getElementById('style-rules');
+            const div = document.createElement('div');
+            div.className = 'style-rule';
+            div.innerHTML = `
+                <input type="text" placeholder="ルールを入力" />
+                <button class="icon-btn remove-rule">✕</button>
+            `;
+            container.appendChild(div);
+            
+            div.querySelector('.remove-rule').addEventListener('click', () => div.remove());
+        });
+        
+        // 既存のルール削除ボタン
+        document.querySelectorAll('.remove-rule').forEach(btn => {
+            btn.addEventListener('click', () => btn.closest('.style-rule').remove());
+        });
+        
+        // ナビゲーション
+        document.getElementById('back-to-step-1').addEventListener('click', () => goToStep(1));
+        document.getElementById('back-to-step-2').addEventListener('click', () => goToStep(2));
+        
+        document.getElementById('go-to-step-3').addEventListener('click', () => {
+            updateSectionsFromInputs();
+            state.templateName = elements.templateName.value;
+            
+            // スタイルルールを取得
+            state.styleRules = [];
+            document.querySelectorAll('#style-rules input').forEach(input => {
+                if (input.value.trim()) {
+                    state.styleRules.push(input.value.trim());
+                }
+            });
+            
+            // プレビュー更新
+            document.getElementById('preview-name').textContent = state.templateName;
+            document.getElementById('preview-excel').textContent = `Excel: ${state.excelFilename}`;
+            
+            document.getElementById('preview-sections').innerHTML = state.sections.map(s => `
+                <div class="preview-section">
+                    <div class="preview-label">${s.label} (${s.cell})</div>
+                    <div class="preview-value">キー: ${s.key}</div>
+                </div>
+            `).join('');
+            
+            document.getElementById('preview-rules').innerHTML = state.styleRules.map(r => `
+                <li>${r}</li>
+            `).join('');
+            
+            goToStep(3);
+        });
+        
+        // 保存
+        document.getElementById('save-template').addEventListener('click', async () => {
+            const formData = new FormData();
+            formData.append('excel_filename', state.excelFilename);
+            formData.append('template_name', state.templateName);
+            formData.append('sections', JSON.stringify(state.sections));
+            formData.append('style_rules', JSON.stringify(state.styleRules));
+            
+            try {
+                const response = await fetch('/api/templates/create', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail);
+                }
+                
+                goToStep(4);
+                
+            } catch (error) {
+                alert('エラー: ' + error.message);
+            }
+        });
+        
+        // 初期化
+        setupExcelUpload();
+    </script>
+</body>
+</html>

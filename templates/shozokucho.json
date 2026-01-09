@@ -1,0 +1,19 @@
+{
+  "name": "所属長会議",
+  "excel_template": "excel_templates/所属長会議まとめ.xlsx",
+  "sheet": "原本",
+  "sections": [
+    { "key": "datetime", "label": "日時", "cell": "A2" },
+    { "key": "shinkomonji", "label": "新小文字", "cell": "B4" },
+    { "key": "fukuokawajiro", "label": "福岡和白", "cell": "B5" },
+    { "key": "shinyukuhashi", "label": "新行橋", "cell": "B6" }
+  ],
+  "chatgpt_prompt": {
+    "style_rules": [
+      "重複や雑談は除外",
+      "箇条書き",
+      "決定事項・課題・次アクションがあれば必ず含める",
+      "不明点は『（要確認）』と付ける"
+    ]
+  }
+}
