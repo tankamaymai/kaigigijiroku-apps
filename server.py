@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 議事録メーカー - Webサーバー
-FastAPI + Whisper + ChatGPT API
+FastAPI + Whisper + ChatGPT / Gemini / Ollama
 """
 import os
 import json
@@ -11,8 +11,10 @@ import tempfile
 import shutil
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+import httpx
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Body
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse
 from openpyxl import load_workbook
@@ -23,6 +25,19 @@ try:
 except ImportError:
     OPENAI_AVAILABLE = False
 
+try:
+    from google import genai
+    from google.genai import types as genai_types
+    GEMINI_AVAILABLE = True
+except ImportError:
+    GEMINI_AVAILABLE = False
+
+try:
+    from faster_whisper import WhisperModel
+    FASTER_WHISPER_AVAILABLE = True
+except ImportError:
+    FASTER_WHISPER_AVAILABLE = False
+
 # ========================================
 # 設定
 # ========================================
@@ -32,6 +47,7 @@ TEMPLATE_DIR = APP_DIR / "templates"
 EXCEL_TEMPLATE_DIR = APP_DIR / "excel_templates"
 OUTPUT_DIR = APP_DIR / "output"
 WEB_DIR = APP_DIR / "web"
+DICTIONARY_FILE = APP_DIR / "dictionary.json"
 
 # outputフォルダがなければ作成
 OUTPUT_DIR.mkdir(exist_ok=True)
@@ -78,48 +94,134 @@ def load_template(filename: str) -> dict:
         return json.load(f)
 
 
-def run_whisper(audio_path: str, model_name: str = "medium") -> str:
-    """Whisperで文字起こし"""
+def load_dictionary() -> dict[str, str]:
+    """文字起こし辞書を読み込む。キー=読み/誤表記、値=正しい表記"""
+    if not DICTIONARY_FILE.exists():
+        return {}
+    try:
+        with open(DICTIONARY_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return {str(k): str(v) for k, v in data.items()}
+    except (json.JSONDecodeError, IOError):
+        return {}
+
+
+def save_dictionary(entries: dict[str, str]) -> None:
+    """文字起こし辞書を保存"""
+    with open(DICTIONARY_FILE, "w", encoding="utf-8") as f:
+        json.dump(entries, f, ensure_ascii=False, indent=2)
+
+
+def apply_dictionary(transcript: str, dictionary: dict[str, str]) -> str:
+    """文字起こし結果に辞書を適用。長いキーから順に置換（部分一致を防ぐ）"""
+    if not dictionary:
+        return transcript
+    result = transcript
+    # 長いキーから順に置換（「福岡和白」が「福岡」より先にマッチするように）
+    for key in sorted(dictionary.keys(), key=len, reverse=True):
+        if key and key in result:
+            result = result.replace(key, dictionary[key])
+    return result
+
+
+_whisper_model_cache: dict = {}
+
+
+def run_whisper(audio_path: str, model_name: str = "medium", dictionary: Optional[dict[str, str]] = None) -> str:
+    """Whisperで文字起こし（faster-whisper優先、フォールバックで従来版）。辞書があれば反映"""
+    if dictionary is None:
+        dictionary = load_dictionary()
+    if FASTER_WHISPER_AVAILABLE:
+        return _run_faster_whisper(audio_path, model_name, dictionary)
+    return _run_whisper_cli(audio_path, model_name, dictionary)
+
+
+def _run_faster_whisper(audio_path: str, model_name: str = "medium", dictionary: Optional[dict[str, str]] = None) -> str:
+    """faster-whisperで高速文字起こし（従来の4〜8倍速）"""
+    import time
+    start = time.time()
+
+    print(f"[WHISPER] faster-whisper で実行")
+    print(f"[WHISPER] 入力ファイル: {audio_path}")
+    print(f"[WHISPER] モデル: {model_name}")
+
+    if model_name not in _whisper_model_cache:
+        print(f"[WHISPER] モデル '{model_name}' を読み込み中...")
+        _whisper_model_cache[model_name] = WhisperModel(
+            model_name,
+            device="cpu",
+            compute_type="int8",
+        )
+        print(f"[WHISPER] モデル読み込み完了")
+
+    model = _whisper_model_cache[model_name]
+
+    # 辞書の正しい表記をhotwordsとして渡す（Whisperが認識しやすくする）
+    hotwords_str = None
+    if dictionary:
+        hotwords_str = " ".join(dictionary.values())
+        print(f"[WHISPER] 辞書適用: {len(dictionary)}件")
+
+    segments, info = model.transcribe(
+        audio_path,
+        language="ja",
+        beam_size=5,
+        vad_filter=True,
+        vad_parameters=dict(min_silence_duration_ms=500),
+        hotwords=hotwords_str,
+    )
+
+    texts = []
+    for segment in segments:
+        texts.append(segment.text.strip())
+
+    transcript = "\n".join(texts)
+    transcript = apply_dictionary(transcript, dictionary or {})
+    elapsed = time.time() - start
+    print(f"[WHISPER] 文字起こし完了: {len(transcript)}文字 ({elapsed:.1f}秒)")
+    print(f"[WHISPER] 検出言語: {info.language} (確率: {info.language_probability:.2f})")
+
+    if not transcript:
+        raise HTTPException(status_code=500, detail="文字起こし結果が空です")
+
+    return transcript
+
+
+def _run_whisper_cli(audio_path: str, model_name: str = "medium", dictionary: Optional[dict[str, str]] = None) -> str:
+    """従来のWhisper CLIで文字起こし（フォールバック用）。辞書は後処理で適用"""
+    print(f"[WHISPER] CLI版 (openai-whisper) で実行")
     print(f"[WHISPER] 入力ファイル: {audio_path}")
     print(f"[WHISPER] モデル: {model_name}")
     print(f"[WHISPER] 出力先: {OUTPUT_DIR}")
-    
+
     result = subprocess.run(
         ["whisper", audio_path, "--language", "Japanese", "--model", model_name, "--output_dir", str(OUTPUT_DIR)],
         capture_output=True,
         text=True
     )
-    
+
     print(f"[WHISPER] 終了コード: {result.returncode}")
     if result.stdout:
         print(f"[WHISPER] stdout: {result.stdout[:500]}")
     if result.stderr:
         print(f"[WHISPER] stderr: {result.stderr[:500]}")
-    
+
     if result.returncode != 0:
         raise HTTPException(status_code=500, detail=f"Whisper実行エラー: {result.stderr}")
-    
-    # 生成されたテキストファイルを探す
+
     base = os.path.splitext(os.path.basename(audio_path))[0]
     txt_path = OUTPUT_DIR / f"{base}.txt"
-    
-    print(f"[WHISPER] 期待するファイル: {txt_path}")
-    
-    # ファイルが見つからない場合、outputフォルダ内の最新の.txtを探す
+
     if not txt_path.exists():
-        print(f"[WHISPER] ファイルが見つかりません。outputフォルダを検索...")
         txt_files = list(OUTPUT_DIR.glob("*.txt"))
-        print(f"[WHISPER] 見つかった.txtファイル: {txt_files}")
-        
         if txt_files:
-            # 最新のファイルを使用
             txt_path = max(txt_files, key=lambda p: p.stat().st_mtime)
-            print(f"[WHISPER] 最新のファイルを使用: {txt_path}")
         else:
             raise HTTPException(status_code=500, detail="文字起こしファイルが生成されませんでした")
-    
+
     with open(txt_path, "r", encoding="utf-8") as f:
-        return f.read().strip()
+        transcript = f.read().strip()
+    return apply_dictionary(transcript, dictionary or {})
 
 
 def build_prompt(tpl: dict, transcript: str) -> str:
@@ -154,6 +256,134 @@ def build_prompt(tpl: dict, transcript: str) -> str:
 """
 
 
+def build_freeform_prompt(transcript: str) -> str:
+    """テンプレートなし用のプロンプトを構築"""
+    return f"""あなたは会議議事録作成のプロです。以下の文字起こしから、適切な議事録を作成してください。
+
+【ルール】
+- 会議の内容を分析し、適切な項目に分けて整理してください
+- 箇条書きで簡潔にまとめてください
+- 重要な決定事項やアクションアイテムは明確に記載してください
+- 雑談や重複は除外してください
+- 該当する内容がない項目は省略してください
+
+【出力形式（厳守）】
+以下のJSON形式のみを返してください。コードブロック（```）は絶対に使わないでください。
+項目の値は文字列で返してください。箇条書きは改行で区切ってください。
+
+{{
+  "meeting_title": "会議のタイトル（内容から推測）",
+  "date_info": "日時に関する情報（言及があれば）",
+  "attendees": "参加者（言及があれば）",
+  "agenda": "議題・アジェンダ",
+  "discussion": "議論・報告内容の要約",
+  "decisions": "決定事項",
+  "action_items": "アクションアイテム・TODO",
+  "notes": "その他特記事項"
+}}
+
+【会議の文字起こし】
+{transcript}
+"""
+
+
+FREEFORM_LABELS = {
+    "meeting_title": "会議タイトル",
+    "date_info": "日時",
+    "attendees": "参加者",
+    "agenda": "議題・アジェンダ",
+    "discussion": "議論・報告内容",
+    "decisions": "決定事項",
+    "action_items": "アクションアイテム",
+    "notes": "その他特記事項",
+}
+
+
+def write_freeform_excel(data: dict, output_name: str) -> Path:
+    """テンプレートなしでExcelファイルを生成"""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "議事録"
+
+    header_font = Font(name="Yu Gothic", size=14, bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="2B579A", end_color="2B579A", fill_type="solid")
+    label_font = Font(name="Yu Gothic", size=11, bold=True, color="2B579A")
+    label_fill = PatternFill(start_color="D6E4F0", end_color="D6E4F0", fill_type="solid")
+    value_font = Font(name="Yu Gothic", size=11)
+    thin_border = Border(
+        left=Side(style="thin", color="B0B0B0"),
+        right=Side(style="thin", color="B0B0B0"),
+        top=Side(style="thin", color="B0B0B0"),
+        bottom=Side(style="thin", color="B0B0B0"),
+    )
+
+    ws.column_dimensions["A"].width = 22
+    ws.column_dimensions["B"].width = 80
+
+    title = data.get("meeting_title", "会議議事録")
+    ws.merge_cells("A1:B1")
+    cell = ws["A1"]
+    cell.value = title
+    cell.font = header_font
+    cell.fill = header_fill
+    cell.alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[1].height = 40
+
+    row = 3
+    for key, label in FREEFORM_LABELS.items():
+        value = data.get(key, "")
+        if not value or key == "meeting_title":
+            continue
+
+        if not isinstance(value, str):
+            value = str(value)
+
+        label_cell = ws.cell(row=row, column=1, value=label)
+        label_cell.font = label_font
+        label_cell.fill = label_fill
+        label_cell.alignment = Alignment(vertical="top", wrap_text=True)
+        label_cell.border = thin_border
+
+        value_cell = ws.cell(row=row, column=2, value=value)
+        value_cell.font = value_font
+        value_cell.alignment = Alignment(vertical="top", wrap_text=True)
+        value_cell.border = thin_border
+
+        line_count = value.count("\n") + 1
+        ws.row_dimensions[row].height = max(30, line_count * 18)
+
+        row += 1
+
+    output_path = OUTPUT_DIR / output_name
+    wb.save(output_path)
+    print(f"[EXCEL] 自由形式Excel生成完了: {output_path}")
+    return output_path
+
+
+def parse_ai_response(content: str, provider_name: str) -> dict:
+    """AI応答からJSONをパースする共通処理"""
+    if "```json" in content:
+        content = content.split("```json")[1]
+    if "```" in content:
+        content = content.split("```")[0]
+    content = content.strip()
+    
+    try:
+        parsed = json.loads(content)
+        print(f"[DEBUG] Parsed JSON keys: {list(parsed.keys())}")
+        
+        if "sections" in parsed and isinstance(parsed["sections"], dict):
+            parsed = parsed["sections"]
+            print(f"[DEBUG] Extracted from 'sections': {list(parsed.keys())}")
+        
+        return parsed
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=500, detail=f"{provider_name}の応答をJSONとして解析できません: {e}\n応答: {content[:200]}")
+
+
 def call_chatgpt(api_key: str, prompt: str, model: str = "gpt-4o-mini") -> dict:
     """ChatGPT APIを呼び出し"""
     if not OPENAI_AVAILABLE:
@@ -174,25 +404,61 @@ def call_chatgpt(api_key: str, prompt: str, model: str = "gpt-4o-mini") -> dict:
     content = response.choices[0].message.content
     print(f"[DEBUG] ChatGPT raw response: {content[:500]}...")
     
-    # JSONをパース
-    if "```json" in content:
-        content = content.split("```json")[1]
-    if "```" in content:
-        content = content.split("```")[0]
-    content = content.strip()
+    return parse_ai_response(content, "ChatGPT")
+
+
+def call_gemini(api_key: str, prompt: str, model: str = "gemini-2.0-flash") -> dict:
+    """Gemini APIを呼び出し"""
+    if not GEMINI_AVAILABLE:
+        raise HTTPException(status_code=500, detail="Google GenAIライブラリがインストールされていません。pip install google-genai を実行してください。")
     
+    client = genai.Client(api_key=api_key)
+    
+    response = client.models.generate_content(
+        model=model,
+        contents=prompt,
+        config=genai_types.GenerateContentConfig(
+            system_instruction="あなたは議事録作成のプロフェッショナルです。会議の内容を正確かつ簡潔にまとめてください。",
+            temperature=0.3,
+            max_output_tokens=4000,
+        )
+    )
+    
+    content = response.text
+    print(f"[DEBUG] Gemini raw response: {content[:500]}...")
+    
+    return parse_ai_response(content, "Gemini")
+
+
+def call_ollama(prompt: str, model: str = "gemma3", endpoint: str = "http://localhost:11434") -> dict:
+    """Ollama（ローカルLLM）を呼び出し。データは外部に送信されない。"""
+    api_url = f"{endpoint.rstrip('/')}/api/chat"
+
     try:
-        parsed = json.loads(content)
-        print(f"[DEBUG] Parsed JSON keys: {list(parsed.keys())}")
-        
-        # ネストされた "sections" キーがある場合は展開
-        if "sections" in parsed and isinstance(parsed["sections"], dict):
-            parsed = parsed["sections"]
-            print(f"[DEBUG] Extracted from 'sections': {list(parsed.keys())}")
-        
-        return parsed
-    except json.JSONDecodeError as e:
-        raise HTTPException(status_code=500, detail=f"ChatGPTの応答をJSONとして解析できません: {e}\n応答: {content[:200]}")
+        with httpx.Client(timeout=300.0) as client:
+            response = client.post(api_url, json={
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": "あなたは議事録作成のプロフェッショナルです。会議の内容を正確かつ簡潔にまとめてください。"},
+                    {"role": "user", "content": prompt}
+                ],
+                "stream": False,
+                "options": {
+                    "temperature": 0.3,
+                    "num_predict": 4000,
+                }
+            })
+            response.raise_for_status()
+    except httpx.ConnectError:
+        raise HTTPException(status_code=500, detail="Ollamaに接続できません。Ollamaが起動しているか確認してください。\n起動コマンド: ollama serve")
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=500, detail=f"Ollamaエラー: {e.response.text}")
+
+    data = response.json()
+    content = data.get("message", {}).get("content", "")
+    print(f"[DEBUG] Ollama raw response: {content[:500]}...")
+
+    return parse_ai_response(content, "Ollama")
 
 
 def write_excel(tpl: dict, data: dict, output_name: str) -> Path:
@@ -245,6 +511,69 @@ def write_excel(tpl: dict, data: dict, output_name: str) -> Path:
     return output_path
 
 
+def _data_to_labeled_items(data: dict, tpl: Optional[dict], is_freeform: bool) -> list[tuple[str, str]]:
+    """AIデータを (ラベル, 値) のリストに変換（テキスト/Word出力用）"""
+    items = []
+    if is_freeform:
+        for key, label in FREEFORM_LABELS.items():
+            value = data.get(key, "")
+            if value and key != "meeting_title":
+                items.append((label, str(value) if not isinstance(value, str) else value))
+    else:
+        key_to_label = {s["key"]: s.get("label", s["key"]) for s in tpl["sections"]}
+        for key, value in data.items():
+            if value and key in key_to_label:
+                items.append((key_to_label[key], str(value) if not isinstance(value, str) else value))
+    return items
+
+
+def write_text(data: dict, tpl: Optional[dict], is_freeform: bool, output_name: str) -> Path:
+    """テキストファイルを生成"""
+    title = (tpl["name"] if tpl else None) or data.get("meeting_title", "議事録")
+    items = _data_to_labeled_items(data, tpl, is_freeform)
+    
+    lines = [f"# {title}", "", "=" * 40, ""]
+    for label, value in items:
+        lines.append(f"## {label}")
+        lines.append(value)
+        lines.append("")
+    
+    output_path = OUTPUT_DIR / output_name
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+    
+    print(f"[TEXT] テキストファイル生成完了: {output_path}")
+    return output_path
+
+
+def write_docx(data: dict, tpl: Optional[dict], is_freeform: bool, output_name: str) -> Path:
+    """Wordファイルを生成"""
+    try:
+        from docx import Document
+        from docx.shared import Pt
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+    except ImportError:
+        raise HTTPException(status_code=500, detail="python-docx がインストールされていません。pip install python-docx を実行してください。")
+    
+    doc = Document()
+    title = (tpl["name"] if tpl else None) or data.get("meeting_title", "議事録")
+    items = _data_to_labeled_items(data, tpl, is_freeform)
+    
+    # タイトル
+    h = doc.add_heading(title, 0)
+    h.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    for label, value in items:
+        doc.add_heading(label, level=2)
+        p = doc.add_paragraph(value)
+        p.paragraph_format.space_after = Pt(12)
+    
+    output_path = OUTPUT_DIR / output_name
+    doc.save(output_path)
+    print(f"[DOCX] Wordファイル生成完了: {output_path}")
+    return output_path
+
+
 # ========================================
 # APIエンドポイント
 # ========================================
@@ -271,18 +600,45 @@ async def get_templates():
     return {"templates": list_templates()}
 
 
+@app.get("/api/dictionary")
+async def get_dictionary():
+    """文字起こし辞書を取得"""
+    return {"entries": load_dictionary()}
+
+
+@app.post("/api/dictionary")
+async def save_dictionary_api(body: dict = Body(...)):
+    """文字起こし辞書を保存。body: {"entries": {"読み": "漢字", ...}}"""
+    entries = body.get("entries", body)
+    if not isinstance(entries, dict):
+        raise HTTPException(status_code=400, detail="entries はオブジェクトである必要があります")
+    save_dictionary(entries)
+    return {"success": True, "count": len(entries)}
+
+
 @app.post("/api/process")
 async def process_audio(
     file: UploadFile = File(...),
     whisper_model: str = Form("medium"),
     gpt_model: str = Form("gpt-4o-mini"),
     template: str = Form("shozokucho.json"),
-    api_key: str = Form(...)
+    api_key: Optional[str] = Form(None),
+    ai_provider: str = Form("openai"),
+    ollama_endpoint: str = Form("http://localhost:11434"),
+    output_format: str = Form("excel"),
 ):
     """
     音声ファイルを処理して議事録を生成
+    ai_provider: "openai", "gemini", "ollama"
+    template: "__none__" の場合はテンプレートなし（自由形式）
+    output_format: "excel", "text", "docx"
     """
     tmp_path = None
+    is_freeform = (template == "__none__")
+    
+    if ai_provider != "ollama" and not api_key:
+        provider_name = "Gemini" if ai_provider == "gemini" else "OpenAI"
+        raise HTTPException(status_code=400, detail=f"{provider_name} API Keyが必要です")
     
     try:
         # 一時ファイルに保存
@@ -293,39 +649,85 @@ async def process_audio(
             tmp_path = tmp.name
         
         print(f"[INFO] 音声ファイル保存: {tmp_path} ({len(content)} bytes)")
+        print(f"[INFO] モード: {'自由形式' if is_freeform else 'テンプレート'}")
+        print(f"[INFO] AIプロバイダー: {ai_provider}")
+        print(f"[INFO] 出力形式: {output_format}")
         
         # 1. 文字起こし
         print(f"[INFO] Whisper開始 (モデル: {whisper_model})")
         transcript = run_whisper(tmp_path, whisper_model)
         print(f"[INFO] 文字起こし完了: {len(transcript)}文字")
         
-        # 2. テンプレート読み込み
-        tpl = load_template(template)
-        print(f"[INFO] テンプレート読み込み: {tpl['name']}")
+        # 2. プロンプト生成（モードに応じて分岐）
+        tpl = None
+        if is_freeform:
+            print(f"[INFO] 自由形式モード: テンプレートなしで議事録作成")
+            prompt = build_freeform_prompt(transcript)
+        else:
+            tpl = load_template(template)
+            print(f"[INFO] テンプレート読み込み: {tpl['name']}")
+            prompt = build_prompt(tpl, transcript)
         
-        # 3. プロンプト生成
-        prompt = build_prompt(tpl, transcript)
+        # 3. AI API呼び出し（プロバイダーに応じて切替）
+        if ai_provider == "ollama":
+            print(f"[INFO] Ollama呼び出し (モデル: {gpt_model}, エンドポイント: {ollama_endpoint})")
+            data = call_ollama(prompt, gpt_model, ollama_endpoint)
+            print(f"[INFO] Ollama応答受信（ローカル処理完了）")
+        elif ai_provider == "gemini":
+            print(f"[INFO] Gemini API呼び出し (モデル: {gpt_model})")
+            data = call_gemini(api_key, prompt, gpt_model)
+            print(f"[INFO] Gemini応答受信")
+        else:
+            print(f"[INFO] ChatGPT API呼び出し (モデル: {gpt_model})")
+            data = call_chatgpt(api_key, prompt, gpt_model)
+            print(f"[INFO] ChatGPT応答受信")
         
-        # 4. ChatGPT API呼び出し
-        print(f"[INFO] ChatGPT API呼び出し (モデル: {gpt_model})")
-        data = call_chatgpt(api_key, prompt, gpt_model)
-        print(f"[INFO] ChatGPT応答受信")
-        
-        # 5. Excel生成
+        # 4. ファイル生成（出力形式・モードに応じて分岐）
         base = os.path.splitext(file.filename)[0]
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_name = f"{tpl['name']}_{base}_{timestamp}.xlsx"
+        meeting_title = data.get("meeting_title", "議事録")
+        tpl_name = tpl["name"] if tpl else meeting_title
         
-        output_path = write_excel(tpl, data, output_name)
-        print(f"[INFO] Excel生成完了: {output_path}")
+        ext_map = {"excel": ".xlsx", "text": ".txt", "docx": ".docx"}
+        ext = ext_map.get(output_format, ".xlsx")
+        output_name = f"{tpl_name}_{base}_{timestamp}{ext}"
+        
+        if output_format == "excel":
+            if is_freeform:
+                output_path = write_freeform_excel(data, output_name)
+            else:
+                output_path = write_excel(tpl, data, output_name)
+        elif output_format == "text":
+            output_path = write_text(data, tpl, is_freeform, output_name)
+        elif output_format == "docx":
+            output_path = write_docx(data, tpl, is_freeform, output_name)
+        else:
+            output_format = "excel"
+            output_name = f"{tpl_name}_{base}_{timestamp}.xlsx"
+            if is_freeform:
+                output_path = write_freeform_excel(data, output_name)
+            else:
+                output_path = write_excel(tpl, data, output_name)
+        
+        if is_freeform:
+            summary_display = {
+                FREEFORM_LABELS.get(k, k): v
+                for k, v in data.items()
+                if v
+            }
+        else:
+            summary_display = data
+        
+        format_labels = {"excel": "Excel", "text": "テキスト", "docx": "Word"}
+        print(f"[INFO] {format_labels.get(output_format, 'Excel')}生成完了: {output_path}")
         
         return {
             "success": True,
             "filename": output_name,
             "path": str(OUTPUT_DIR),
             "transcript_length": len(transcript),
-            "transcript": transcript,  # 文字起こし結果を追加
-            "summary": data,  # AI要約結果を追加
+            "transcript": transcript,
+            "summary": summary_display,
             "sections": list(data.keys())
         }
         
@@ -340,9 +742,19 @@ async def process_audio(
             os.unlink(tmp_path)
 
 
+def _get_media_type(filename: str) -> str:
+    """ファイル拡張子からメディアタイプを返す"""
+    ext = os.path.splitext(filename)[1].lower()
+    return {
+        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ".txt": "text/plain; charset=utf-8",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    }.get(ext, "application/octet-stream")
+
+
 @app.get("/api/download/{filename}")
 async def download_file(filename: str):
-    """生成したExcelファイルをダウンロード"""
+    """生成したファイルをダウンロード（Excel / テキスト / Word）"""
     file_path = OUTPUT_DIR / filename
     
     if not file_path.exists():
@@ -351,7 +763,7 @@ async def download_file(filename: str):
     return FileResponse(
         path=file_path,
         filename=filename,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        media_type=_get_media_type(filename)
     )
 
 
@@ -368,8 +780,51 @@ async def health_check():
     return {
         "status": "ok",
         "openai_available": OPENAI_AVAILABLE,
+        "gemini_available": GEMINI_AVAILABLE,
+        "faster_whisper": FASTER_WHISPER_AVAILABLE,
         "templates_count": len(list_templates())
     }
+
+
+# ========================================
+# Ollama API
+# ========================================
+
+@app.get("/api/ollama/status")
+async def ollama_status(endpoint: str = "http://localhost:11434"):
+    """Ollamaの接続状態を確認"""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{endpoint.rstrip('/')}/api/tags")
+            resp.raise_for_status()
+            data = resp.json()
+            models = [m["name"] for m in data.get("models", [])]
+            return {"running": True, "models": models}
+    except Exception:
+        return {"running": False, "models": []}
+
+
+@app.get("/api/ollama/models")
+async def ollama_models(endpoint: str = "http://localhost:11434"):
+    """Ollamaで利用可能なモデル一覧を取得"""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{endpoint.rstrip('/')}/api/tags")
+            resp.raise_for_status()
+            data = resp.json()
+            models = []
+            for m in data.get("models", []):
+                size_gb = m.get("size", 0) / (1024**3)
+                models.append({
+                    "name": m["name"],
+                    "size": f"{size_gb:.1f}GB",
+                    "modified": m.get("modified_at", ""),
+                })
+            return {"models": models}
+    except httpx.ConnectError:
+        raise HTTPException(status_code=503, detail="Ollamaに接続できません。ollama serve で起動してください。")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ========================================

@@ -8,10 +8,16 @@
 // ========================================
 
 const state = {
+    aiProvider: 'ollama',
     apiKey: '',
+    geminiApiKey: '',
+    ollamaEndpoint: 'http://localhost:11434',
+    ollamaModel: '',
     whisperModel: 'medium',
     gptModel: 'gpt-4o-mini',
+    geminiModel: 'gemini-2.0-flash',
     selectedTemplate: 'shozokucho.json',
+    outputFormat: 'excel',
     selectedFile: null,
     isProcessing: false
 };
@@ -25,9 +31,21 @@ let elements = {};
 function initElements() {
     elements = {
         // 設定
+        aiProviderSelect: document.getElementById('ai-provider'),
         apiKeyInput: document.getElementById('api-key'),
+        geminiApiKeyInput: document.getElementById('gemini-api-key'),
+        ollamaEndpointInput: document.getElementById('ollama-endpoint'),
+        ollamaModelSelect: document.getElementById('ollama-model'),
+        ollamaRefreshBtn: document.getElementById('ollama-refresh'),
         whisperModelSelect: document.getElementById('whisper-model'),
         gptModelSelect: document.getElementById('gpt-model'),
+        geminiModelSelect: document.getElementById('gemini-model'),
+        openaiSettings: document.getElementById('openai-settings'),
+        geminiSettings: document.getElementById('gemini-settings'),
+        ollamaSettings: document.getElementById('ollama-settings'),
+        outputFormatSelect: document.getElementById('output-format'),
+        dictionaryText: document.getElementById('dictionary-text'),
+        saveDictionaryBtn: document.querySelector('.save-dictionary'),
         
         // アップロード
         uploadZone: document.getElementById('upload-zone'),
@@ -98,29 +116,200 @@ function loadSettings() {
     const saved = localStorage.getItem('minutesMakerSettings');
     if (saved) {
         const settings = JSON.parse(saved);
+        state.aiProvider = settings.aiProvider || 'ollama';
         state.apiKey = settings.apiKey || '';
+        state.geminiApiKey = settings.geminiApiKey || '';
+        state.ollamaEndpoint = settings.ollamaEndpoint || 'http://localhost:11434';
+        state.ollamaModel = settings.ollamaModel || '';
         state.whisperModel = settings.whisperModel || 'medium';
         state.gptModel = settings.gptModel || 'gpt-4o-mini';
+        state.geminiModel = settings.geminiModel || 'gemini-2.0-flash';
+        state.outputFormat = settings.outputFormat || 'excel';
         
+        if (elements.aiProviderSelect) elements.aiProviderSelect.value = state.aiProvider;
         if (elements.apiKeyInput) elements.apiKeyInput.value = state.apiKey;
+        if (elements.geminiApiKeyInput) elements.geminiApiKeyInput.value = state.geminiApiKey;
+        if (elements.ollamaEndpointInput) elements.ollamaEndpointInput.value = state.ollamaEndpoint;
         if (elements.whisperModelSelect) elements.whisperModelSelect.value = state.whisperModel;
         if (elements.gptModelSelect) elements.gptModelSelect.value = state.gptModel;
+        if (elements.geminiModelSelect) elements.geminiModelSelect.value = state.geminiModel;
+        if (elements.outputFormatSelect) elements.outputFormatSelect.value = state.outputFormat;
     }
+    switchProvider(state.aiProvider);
 }
 
 function saveSettings() {
+    state.aiProvider = elements.aiProviderSelect.value;
     state.apiKey = elements.apiKeyInput.value;
+    state.geminiApiKey = elements.geminiApiKeyInput.value;
+    state.ollamaEndpoint = elements.ollamaEndpointInput.value;
+    state.ollamaModel = elements.ollamaModelSelect.value;
     state.whisperModel = elements.whisperModelSelect.value;
     state.gptModel = elements.gptModelSelect.value;
+    state.geminiModel = elements.geminiModelSelect.value;
+    state.outputFormat = elements.outputFormatSelect ? elements.outputFormatSelect.value : 'excel';
     
     localStorage.setItem('minutesMakerSettings', JSON.stringify({
+        aiProvider: state.aiProvider,
         apiKey: state.apiKey,
+        geminiApiKey: state.geminiApiKey,
+        ollamaEndpoint: state.ollamaEndpoint,
+        ollamaModel: state.ollamaModel,
         whisperModel: state.whisperModel,
-        gptModel: state.gptModel
+        gptModel: state.gptModel,
+        geminiModel: state.geminiModel,
+        outputFormat: state.outputFormat
     }));
     
     log('設定を保存しました', 'success');
     alert('設定を保存しました！');
+}
+
+async function loadDictionary() {
+    try {
+        const res = await fetch('/api/dictionary');
+        const data = await res.json();
+        const entries = data.entries || {};
+        const lines = Object.entries(entries).map(([k, v]) => `${k},${v}`);
+        if (elements.dictionaryText) {
+            elements.dictionaryText.value = lines.join('\n');
+        }
+    } catch (e) {
+        console.warn('辞書の読み込みに失敗:', e);
+    }
+}
+
+function parseDictionaryText(text) {
+    const entries = {};
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+    for (const line of lines) {
+        const sep = line.includes(',') ? ',' : (line.includes('=') ? '=' : null);
+        if (sep) {
+            const idx = line.indexOf(sep);
+            const key = line.slice(0, idx).trim();
+            const val = line.slice(idx + 1).trim();
+            if (key && val) entries[key] = val;
+        }
+    }
+    return entries;
+}
+
+async function saveDictionary() {
+    if (!elements.dictionaryText) return;
+    const text = elements.dictionaryText.value;
+    const entries = parseDictionaryText(text);
+    try {
+        const res = await fetch('/api/dictionary', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ entries })
+        });
+        if (!res.ok) throw new Error('保存に失敗しました');
+        log(`辞書を保存しました（${Object.keys(entries).length}件）`, 'success');
+        alert('辞書を保存しました！');
+    } catch (e) {
+        log(`辞書の保存に失敗: ${e.message}`, 'error');
+        alert(`エラー: ${e.message}`);
+    }
+}
+
+function switchProvider(provider) {
+    state.aiProvider = provider;
+    
+    const showMap = {
+        ollama:  { ollama: true,  openai: false, gemini: false },
+        openai:  { ollama: false, openai: true,  gemini: false },
+        gemini:  { ollama: false, openai: false, gemini: true  },
+    };
+    const show = showMap[provider] || showMap.ollama;
+    
+    if (elements.ollamaSettings) elements.ollamaSettings.style.display = show.ollama ? 'block' : 'none';
+    if (elements.openaiSettings) elements.openaiSettings.style.display = show.openai ? 'block' : 'none';
+    if (elements.geminiSettings) elements.geminiSettings.style.display = show.gemini ? 'block' : 'none';
+    
+    if (elements.ollamaModelSelect) elements.ollamaModelSelect.style.display = show.ollama ? 'block' : 'none';
+    if (elements.gptModelSelect) elements.gptModelSelect.style.display = show.openai ? 'block' : 'none';
+    if (elements.geminiModelSelect) elements.geminiModelSelect.style.display = show.gemini ? 'block' : 'none';
+    
+    const modelLabel = document.getElementById('model-label');
+    if (modelLabel) {
+        const labels = { ollama: 'Ollamaモデル', openai: 'GPTモデル', gemini: 'Geminiモデル' };
+        modelLabel.textContent = labels[provider] || 'AIモデル';
+    }
+    
+    if (provider === 'ollama') {
+        refreshOllamaModels();
+    }
+}
+
+function getActiveApiKey() {
+    if (state.aiProvider === 'ollama') return '__ollama__';
+    if (state.aiProvider === 'gemini') return state.geminiApiKey;
+    return state.apiKey;
+}
+
+function getActiveModel() {
+    if (state.aiProvider === 'ollama') return state.ollamaModel;
+    if (state.aiProvider === 'gemini') return state.geminiModel;
+    return state.gptModel;
+}
+
+// ========================================
+// Ollama モデル管理
+// ========================================
+
+async function refreshOllamaModels() {
+    const endpoint = elements.ollamaEndpointInput ? elements.ollamaEndpointInput.value : state.ollamaEndpoint;
+    const statusIcon = document.getElementById('ollama-status-icon');
+    const statusText = document.getElementById('ollama-status-text');
+    
+    if (statusIcon) statusIcon.textContent = '⏳';
+    if (statusText) statusText.textContent = '接続確認中...';
+    
+    try {
+        const resp = await fetch(`/api/ollama/models?endpoint=${encodeURIComponent(endpoint)}`);
+        
+        if (!resp.ok) {
+            if (statusIcon) statusIcon.textContent = '❌';
+            if (statusText) statusText.textContent = 'Ollamaに接続できません';
+            log('Ollamaに接続できません。ollama serve で起動してください。', 'error');
+            return;
+        }
+        
+        const data = await resp.json();
+        const select = elements.ollamaModelSelect;
+        if (!select) return;
+        
+        select.innerHTML = '';
+        
+        if (data.models.length === 0) {
+            select.innerHTML = '<option value="">モデルがありません</option>';
+            if (statusIcon) statusIcon.textContent = '⚠️';
+            if (statusText) statusText.textContent = '接続OK（モデルなし）';
+            log('Ollamaにモデルがインストールされていません。ollama pull gemma3 等でインストールしてください。', 'error');
+            return;
+        }
+        
+        data.models.forEach((m, i) => {
+            const opt = document.createElement('option');
+            opt.value = m.name;
+            opt.textContent = `${m.name} (${m.size})`;
+            if (state.ollamaModel === m.name || (i === 0 && !state.ollamaModel)) {
+                opt.selected = true;
+                state.ollamaModel = m.name;
+            }
+            select.appendChild(opt);
+        });
+        
+        if (statusIcon) statusIcon.textContent = '✅';
+        if (statusText) statusText.textContent = `接続OK（${data.models.length}モデル）`;
+        log(`Ollama接続OK: ${data.models.length}モデル利用可能`, 'success');
+        
+    } catch (e) {
+        if (statusIcon) statusIcon.textContent = '❌';
+        if (statusText) statusText.textContent = '接続エラー';
+        console.error('Ollama接続エラー:', e);
+    }
 }
 
 // ========================================
@@ -256,41 +445,49 @@ async function loadTemplates() {
         const data = await response.json();
         const templateList = document.querySelector('.template-list');
         
-        if (!templateList || !data.templates || data.templates.length === 0) {
-            return;
-        }
+        if (!templateList) return;
         
-        // テンプレートアイコンのマッピング
         const icons = ['🏥', '📋', '📝', '📊', '📄', '🗂️', '📑', '🗒️'];
         
-        // テンプレートリストをクリア
         templateList.innerHTML = '';
         
-        // テンプレートを追加
-        data.templates.forEach((tpl, index) => {
-            const item = document.createElement('div');
-            item.className = 'template-item' + (index === 0 ? ' active' : '');
-            item.dataset.template = tpl.filename;
-            item.innerHTML = `
-                <div class="template-icon">${icons[index % icons.length]}</div>
-                <div class="template-info">
-                    <h3>${tpl.name}</h3>
-                    <p>${tpl.sections.length}項目</p>
-                </div>
-                <span class="check-mark">✓</span>
-            `;
-            templateList.appendChild(item);
-        });
+        // 「テンプレートなし」を先頭に追加
+        const freeformItem = document.createElement('div');
+        freeformItem.className = 'template-item active';
+        freeformItem.dataset.template = '__none__';
+        freeformItem.innerHTML = `
+            <div class="template-icon">✨</div>
+            <div class="template-info">
+                <h3>テンプレートなし</h3>
+                <p>AIが自動で議事録を構成</p>
+            </div>
+            <span class="check-mark">✓</span>
+        `;
+        templateList.appendChild(freeformItem);
+        state.selectedTemplate = '__none__';
         
-        // 最初のテンプレートを選択
-        if (data.templates.length > 0) {
-            state.selectedTemplate = data.templates[0].filename;
+        // 既存テンプレートを追加
+        if (data.templates && data.templates.length > 0) {
+            data.templates.forEach((tpl, index) => {
+                const item = document.createElement('div');
+                item.className = 'template-item';
+                item.dataset.template = tpl.filename;
+                item.innerHTML = `
+                    <div class="template-icon">${icons[index % icons.length]}</div>
+                    <div class="template-info">
+                        <h3>${tpl.name}</h3>
+                        <p>${tpl.sections.length}項目</p>
+                    </div>
+                    <span class="check-mark">✓</span>
+                `;
+                templateList.appendChild(item);
+            });
         }
         
-        // クリックイベントを設定
         setupTemplateSelection();
         
-        log(`テンプレート ${data.templates.length}件を読み込みました`, 'info');
+        const totalCount = (data.templates ? data.templates.length : 0) + 1;
+        log(`テンプレート ${totalCount}件を読み込みました（テンプレートなし含む）`, 'info');
         
     } catch (error) {
         console.error('テンプレート読み込みエラー:', error);
@@ -367,8 +564,14 @@ async function runPipeline() {
         return;
     }
     
-    if (!state.apiKey) {
-        alert('OpenAI API Keyを設定してください');
+    if (state.aiProvider === 'ollama') {
+        if (!state.ollamaModel) {
+            alert('Ollamaモデルが選択されていません。Ollamaに接続してモデルを取得してください。');
+            return;
+        }
+    } else if (!getActiveApiKey() || getActiveApiKey() === '__ollama__') {
+        const providerName = state.aiProvider === 'gemini' ? 'Gemini' : 'OpenAI';
+        alert(`${providerName} API Keyを設定してください`);
         return;
     }
     
@@ -387,9 +590,15 @@ async function runPipeline() {
         const formData = new FormData();
         formData.append('file', state.selectedFile);
         formData.append('whisper_model', state.whisperModel);
-        formData.append('gpt_model', state.gptModel);
+        formData.append('gpt_model', getActiveModel());
         formData.append('template', state.selectedTemplate);
-        formData.append('api_key', state.apiKey);
+        formData.append('output_format', elements.outputFormatSelect?.value || state.outputFormat);
+        formData.append('ai_provider', state.aiProvider);
+        if (state.aiProvider === 'ollama') {
+            formData.append('ollama_endpoint', state.ollamaEndpoint);
+        } else {
+            formData.append('api_key', getActiveApiKey());
+        }
         
         updateProgress(30, '🎙️ 文字起こし中...', 1);
         
@@ -422,13 +631,19 @@ async function runPipeline() {
             throw new Error('サーバーからの応答を解析できませんでした');
         }
         
+        const providerLabels = { ollama: 'Ollama（ローカル）', gemini: 'Gemini', openai: 'ChatGPT' };
+        const providerLabel = providerLabels[state.aiProvider] || 'AI';
+        
         // Step 2: AI要約完了
         updateProgress(70, '🤖 AI要約完了', 2);
-        log('✅ ChatGPT応答を受信', 'success');
+        log(`✅ ${providerLabel}応答を受信`, 'success');
         
-        // Step 3: Excel生成完了
-        updateProgress(100, '📊 Excel生成完了', 3);
-        log(`✅ Excel出力完了: ${result.filename}`, 'success');
+        // Step 3: ファイル生成完了
+        const outputFormat = elements.outputFormatSelect?.value || state.outputFormat;
+        const formatLabels = { excel: 'Excel', text: 'テキスト', docx: 'Word' };
+        const formatLabel = formatLabels[outputFormat] || 'ファイル';
+        updateProgress(100, `📄 ${formatLabel}生成完了`, 3);
+        log(`✅ ${formatLabel}出力完了: ${result.filename}`, 'success');
         
         log('='.repeat(40), 'info');
         log('🎉 議事録作成が完了しました！', 'success');
@@ -546,6 +761,19 @@ function setupEventListeners() {
         saveBtn.addEventListener('click', saveSettings);
     }
     
+    // 辞書保存
+    if (elements.saveDictionaryBtn) {
+        elements.saveDictionaryBtn.addEventListener('click', saveDictionary);
+    }
+    
+    // プロバイダー切替
+    if (elements.aiProviderSelect) {
+        elements.aiProviderSelect.addEventListener('change', () => {
+            switchProvider(elements.aiProviderSelect.value);
+            updateRunButton();
+        });
+    }
+    
     // API Key入力時に状態更新
     if (elements.apiKeyInput) {
         elements.apiKeyInput.addEventListener('input', () => {
@@ -553,21 +781,39 @@ function setupEventListeners() {
             updateRunButton();
         });
     }
-    
-    // パスワード表示切替
-    const toggleBtn = document.querySelector('.toggle-visibility');
-    if (toggleBtn) {
-        toggleBtn.addEventListener('click', () => {
-            const input = elements.apiKeyInput;
-            input.type = input.type === 'password' ? 'text' : 'password';
+    if (elements.geminiApiKeyInput) {
+        elements.geminiApiKeyInput.addEventListener('input', () => {
+            state.geminiApiKey = elements.geminiApiKeyInput.value;
+            updateRunButton();
         });
     }
+    
+    // Ollama関連
+    if (elements.ollamaRefreshBtn) {
+        elements.ollamaRefreshBtn.addEventListener('click', () => {
+            state.ollamaEndpoint = elements.ollamaEndpointInput.value;
+            refreshOllamaModels();
+        });
+    }
+    if (elements.ollamaModelSelect) {
+        elements.ollamaModelSelect.addEventListener('change', () => {
+            state.ollamaModel = elements.ollamaModelSelect.value;
+        });
+    }
+    
+    // パスワード表示切替
+    document.querySelectorAll('.toggle-visibility').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const targetId = btn.dataset.target;
+            const input = document.getElementById(targetId);
+            if (input) input.type = input.type === 'password' ? 'text' : 'password';
+        });
+    });
     
     // 実行ボタン
     if (elements.runBtn) {
         elements.runBtn.addEventListener('click', () => {
-            // API Keyがあれば本番モード、なければデモモード
-            if (state.apiKey) {
+            if (state.aiProvider === 'ollama' || getActiveApiKey()) {
                 runPipeline();
             } else {
                 runDemoMode();
@@ -601,6 +847,7 @@ async function init() {
     loadSettings();
     setupFileUpload();
     await loadTemplates();  // テンプレートを動的に読み込む
+    await loadDictionary();
     setupEventListeners();
     updateRunButton();
     

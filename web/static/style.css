@@ -222,6 +222,28 @@ input::placeholder {
     color: var(--text-muted);
 }
 
+.dictionary-textarea {
+    width: 100%;
+    padding: 10px 12px;
+    font-family: inherit;
+    font-size: 0.85rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    resize: vertical;
+    min-height: 100px;
+}
+
+.dictionary-textarea::placeholder {
+    color: var(--text-muted);
+}
+
+.dictionary-textarea:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+}
+
 .input-with-icon {
     position: relative;
     display: flex;
