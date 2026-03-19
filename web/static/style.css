@@ -529,6 +529,80 @@ input::placeholder {
    プログレス
    ======================================== */
 
+/* 文字起こし詳細（音声上の位置） */
+.transcribe-progress-detail {
+    margin-top: 4px;
+    margin-bottom: 20px;
+    padding: 12px 14px;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+}
+
+.transcribe-progress-detail.hidden {
+    display: none;
+}
+
+.transcribe-progress-label {
+    font-size: 0.8rem;
+    color: var(--accent-primary);
+    margin-bottom: 8px;
+    font-weight: 500;
+}
+
+.transcribe-audio-bar {
+    height: 10px;
+    background: var(--bg-card);
+    border-radius: var(--radius-full);
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+}
+
+.transcribe-audio-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--accent-secondary), var(--accent-primary));
+    border-radius: var(--radius-full);
+    transition: width 0.2s ease-out;
+}
+
+.transcribe-audio-fill.indeterminate {
+    width: 35% !important;
+    animation: transcribe-pulse-opacity 1s ease-in-out infinite;
+}
+
+@keyframes transcribe-pulse-opacity {
+    0%, 100% { opacity: 0.35; }
+    50% { opacity: 1; }
+}
+
+.transcribe-time-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+    font-size: 0.8rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-secondary);
+}
+
+.transcribe-time-sep {
+    color: var(--text-muted);
+}
+
+.transcribe-preview {
+    margin-top: 10px;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    line-height: 1.5;
+    max-height: 72px;
+    overflow-y: auto;
+    padding: 8px;
+    background: var(--bg-primary);
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+}
+
 .progress-card {
     padding: 25px;
 }

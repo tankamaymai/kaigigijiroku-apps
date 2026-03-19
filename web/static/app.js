@@ -514,13 +514,97 @@ function setupTemplateSelection() {
 // プログレス表示
 // ========================================
 
+function formatAudioTime(sec) {
+    if (sec == null || !Number.isFinite(sec) || sec < 0) return '—';
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function resetTranscribeDetailUI() {
+    const detail = document.getElementById('transcribe-progress-detail');
+    const label = document.getElementById('transcribe-progress-label');
+    const fill = document.getElementById('transcribe-audio-fill');
+    const cur = document.getElementById('transcribe-time-current');
+    const tot = document.getElementById('transcribe-time-total');
+    const preview = document.getElementById('transcribe-preview');
+    if (detail) detail.classList.add('hidden');
+    if (label) label.textContent = '音声を解析しています…';
+    if (fill) {
+        fill.style.width = '0%';
+        fill.classList.remove('indeterminate');
+    }
+    if (cur) cur.textContent = '0:00';
+    if (tot) tot.textContent = '—';
+    if (preview) preview.textContent = '';
+}
+
+function showTranscribeDetailUI() {
+    const detail = document.getElementById('transcribe-progress-detail');
+    if (detail) detail.classList.remove('hidden');
+}
+
+function applyTranscribeStreamEvent(ev) {
+    const label = document.getElementById('transcribe-progress-label');
+    const fill = document.getElementById('transcribe-audio-fill');
+    const cur = document.getElementById('transcribe-time-current');
+    const tot = document.getElementById('transcribe-time-total');
+    const preview = document.getElementById('transcribe-preview');
+
+    if (ev.type === 'transcribe_start') {
+        showTranscribeDetailUI();
+        if (label) label.textContent = ev.message || '文字起こしを開始しました';
+        if (tot) tot.textContent = ev.duration > 0 ? formatAudioTime(ev.duration) : '取得中…';
+    }
+    if (ev.type === 'transcribe_segment') {
+        showTranscribeDetailUI();
+        if (ev.cli_mode) {
+            if (label) label.textContent = 'Whisper CLI で処理中（完了までお待ちください）';
+            if (fill) fill.classList.add('indeterminate');
+            return;
+        }
+        if (fill) {
+            fill.classList.remove('indeterminate');
+            const pct = typeof ev.percent === 'number' ? Math.min(100, ev.percent) : 0;
+            fill.style.width = `${pct}%`;
+        }
+        if (cur) cur.textContent = formatAudioTime(ev.seconds_end);
+        if (tot && ev.duration > 0) tot.textContent = formatAudioTime(ev.duration);
+        if (label) {
+            label.textContent = ev.duration > 0
+                ? `約 ${formatAudioTime(ev.seconds_end)} / ${formatAudioTime(ev.duration)} まで文字起こし済み`
+                : `セグメント ${ev.segment_index || 0} を処理中`;
+        }
+        if (preview && ev.preview) {
+            preview.textContent = ev.preview;
+        }
+    }
+    if (ev.type === 'transcribe_done') {
+        if (fill) {
+            fill.classList.remove('indeterminate');
+            fill.style.width = '100%';
+        }
+        if (label) label.textContent = `文字起こし完了（${ev.chars || 0}文字）`;
+        if (cur && ev.duration > 0) cur.textContent = formatAudioTime(ev.duration);
+        if (tot && ev.duration > 0) tot.textContent = formatAudioTime(ev.duration);
+    }
+    if (ev.type === 'ai_start') {
+        if (label) label.textContent = ev.message || 'AIで要約しています';
+    }
+    if (ev.type === 'file_write_start') {
+        if (label) label.textContent = ev.message || 'ファイルを書き出しています';
+    }
+}
+
 function showProgress() {
     elements.progressCard.classList.remove('hidden');
     elements.resultCard.classList.add('hidden');
+    resetTranscribeDetailUI();
 }
 
 function hideProgress() {
     elements.progressCard.classList.add('hidden');
+    resetTranscribeDetailUI();
 }
 
 function updateProgress(percent, title, currentStep) {
@@ -558,6 +642,70 @@ function showResult(filename, path) {
 // API通信
 // ========================================
 
+/**
+ * NDJSON ストリームで処理進捗を受け取り、最終 result を返す
+ */
+async function consumeProcessStream(formData, onEvent) {
+    const response = await fetch('/api/process-stream', {
+        method: 'POST',
+        body: formData
+    });
+
+    if (!response.ok) {
+        const t = await response.text();
+        let errMsg = 'サーバーエラー';
+        try {
+            const j = JSON.parse(t);
+            if (Array.isArray(j.detail)) {
+                errMsg = j.detail.map((x) => x.msg || x).join(', ');
+            } else {
+                errMsg = j.detail || errMsg;
+            }
+        } catch (e) {
+            if (t) errMsg = t.slice(0, 300);
+        }
+        throw new Error(errMsg);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let result = null;
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            let ev;
+            try {
+                ev = JSON.parse(trimmed);
+            } catch (e) {
+                continue;
+            }
+            if (ev.type === 'ping') continue;
+            if (ev.type === 'done') {
+                result = ev.result;
+                continue;
+            }
+            if (ev.type === 'error') {
+                throw new Error(ev.detail || '処理エラー');
+            }
+            if (onEvent) onEvent(ev);
+        }
+    }
+
+    if (!result) {
+        throw new Error('サーバーから完了応答がありませんでした');
+    }
+    return result;
+}
+
 async function runPipeline() {
     if (!state.selectedFile) {
         alert('ファイルを選択してください');
@@ -584,9 +732,9 @@ async function runPipeline() {
     
     try {
         // Step 1: 文字起こし
-        updateProgress(10, '🎙️ 音声を文字起こし中...', 1);
+        updateProgress(5, '🎙️ 音声を文字起こし中...', 1);
         log(`🎙️ Whisperで文字起こし開始 (モデル: ${state.whisperModel})`, 'info');
-        
+
         const formData = new FormData();
         formData.append('file', state.selectedFile);
         formData.append('whisper_model', state.whisperModel);
@@ -599,37 +747,23 @@ async function runPipeline() {
         } else {
             formData.append('api_key', getActiveApiKey());
         }
-        
-        updateProgress(30, '🎙️ 文字起こし中...', 1);
-        
-        const response = await fetch('/api/process', {
-            method: 'POST',
-            body: formData
-        });
-        
-        // レスポンスのテキストを取得
-        const responseText = await response.text();
-        console.log('Response status:', response.status);
-        console.log('Response text:', responseText);
-        
-        if (!response.ok) {
-            let errorMessage = 'サーバーエラー';
-            try {
-                const error = JSON.parse(responseText);
-                errorMessage = error.detail || errorMessage;
-            } catch (e) {
-                errorMessage = responseText || errorMessage;
+
+        const result = await consumeProcessStream(formData, (ev) => {
+            applyTranscribeStreamEvent(ev);
+            if (ev.type === 'transcribe_segment' && !ev.cli_mode && typeof ev.percent === 'number') {
+                const overall = 5 + (ev.percent / 100) * 42;
+                updateProgress(Math.round(overall), '🎙️ 文字起こし中...', 1);
             }
-            throw new Error(errorMessage);
-        }
-        
-        // JSONをパース
-        let result;
-        try {
-            result = JSON.parse(responseText);
-        } catch (e) {
-            throw new Error('サーバーからの応答を解析できませんでした');
-        }
+            if (ev.type === 'transcribe_start') {
+                updateProgress(8, '🎙️ 文字起こしを準備中...', 1);
+            }
+            if (ev.type === 'ai_start') {
+                updateProgress(55, '🤖 AI要約中...', 2);
+            }
+            if (ev.type === 'file_write_start') {
+                updateProgress(88, '📄 ファイル生成中...', 3);
+            }
+        });
         
         const providerLabels = { ollama: 'Ollama（ローカル）', gemini: 'Gemini', openai: 'ChatGPT' };
         const providerLabel = providerLabels[state.aiProvider] || 'AI';

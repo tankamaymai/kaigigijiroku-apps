@@ -11,12 +11,14 @@ import tempfile
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+import threading
+from queue import Queue, Empty
+from typing import Any, Callable, Optional
 
 import httpx
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Body
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from openpyxl import load_workbook
 
 try:
@@ -127,16 +129,48 @@ def apply_dictionary(transcript: str, dictionary: dict[str, str]) -> str:
 _whisper_model_cache: dict = {}
 
 
-def run_whisper(audio_path: str, model_name: str = "medium", dictionary: Optional[dict[str, str]] = None) -> str:
+def get_audio_duration_seconds(audio_path: str) -> float:
+    """ffprobe で音声の長さ（秒）を取得。失敗時は 0"""
+    try:
+        r = subprocess.run(
+            [
+                "ffprobe",
+                "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                audio_path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if r.returncode != 0 or not r.stdout.strip():
+            return 0.0
+        return float(r.stdout.strip())
+    except (ValueError, subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return 0.0
+
+
+def run_whisper(
+    audio_path: str,
+    model_name: str = "medium",
+    dictionary: Optional[dict[str, str]] = None,
+    progress_callback: Optional[Callable[[dict[str, Any]], None]] = None,
+) -> str:
     """Whisperで文字起こし（faster-whisper優先、フォールバックで従来版）。辞書があれば反映"""
     if dictionary is None:
         dictionary = load_dictionary()
     if FASTER_WHISPER_AVAILABLE:
-        return _run_faster_whisper(audio_path, model_name, dictionary)
-    return _run_whisper_cli(audio_path, model_name, dictionary)
+        return _run_faster_whisper(audio_path, model_name, dictionary, progress_callback)
+    return _run_whisper_cli(audio_path, model_name, dictionary, progress_callback)
 
 
-def _run_faster_whisper(audio_path: str, model_name: str = "medium", dictionary: Optional[dict[str, str]] = None) -> str:
+def _run_faster_whisper(
+    audio_path: str,
+    model_name: str = "medium",
+    dictionary: Optional[dict[str, str]] = None,
+    progress_callback: Optional[Callable[[dict[str, Any]], None]] = None,
+) -> str:
     """faster-whisperで高速文字起こし（従来の4〜8倍速）"""
     import time
     start = time.time()
@@ -162,6 +196,14 @@ def _run_faster_whisper(audio_path: str, model_name: str = "medium", dictionary:
         hotwords_str = " ".join(dictionary.values())
         print(f"[WHISPER] 辞書適用: {len(dictionary)}件")
 
+    duration_sec = get_audio_duration_seconds(audio_path)
+    if progress_callback:
+        progress_callback({
+            "type": "transcribe_start",
+            "duration": duration_sec,
+            "message": "文字起こしを開始しました",
+        })
+
     segments, info = model.transcribe(
         audio_path,
         language="ja",
@@ -174,6 +216,22 @@ def _run_faster_whisper(audio_path: str, model_name: str = "medium", dictionary:
     texts = []
     for segment in segments:
         texts.append(segment.text.strip())
+        if progress_callback:
+            end_t = float(getattr(segment, "end", 0) or 0)
+            preview = (segment.text or "").strip()[:120]
+            if duration_sec > 0:
+                pct = min(99.9, 100.0 * end_t / duration_sec)
+            else:
+                pct = min(99.9, len(texts) * 2.0)
+            progress_callback({
+                "type": "transcribe_segment",
+                "seconds_start": float(getattr(segment, "start", 0) or 0),
+                "seconds_end": end_t,
+                "duration": duration_sec,
+                "percent": round(pct, 1),
+                "preview": preview,
+                "segment_index": len(texts),
+            })
 
     transcript = "\n".join(texts)
     transcript = apply_dictionary(transcript, dictionary or {})
@@ -184,15 +242,45 @@ def _run_faster_whisper(audio_path: str, model_name: str = "medium", dictionary:
     if not transcript:
         raise HTTPException(status_code=500, detail="文字起こし結果が空です")
 
+    if progress_callback:
+        progress_callback({
+            "type": "transcribe_done",
+            "duration": duration_sec,
+            "chars": len(transcript),
+        })
+
     return transcript
 
 
-def _run_whisper_cli(audio_path: str, model_name: str = "medium", dictionary: Optional[dict[str, str]] = None) -> str:
+def _run_whisper_cli(
+    audio_path: str,
+    model_name: str = "medium",
+    dictionary: Optional[dict[str, str]] = None,
+    progress_callback: Optional[Callable[[dict[str, Any]], None]] = None,
+) -> str:
     """従来のWhisper CLIで文字起こし（フォールバック用）。辞書は後処理で適用"""
     print(f"[WHISPER] CLI版 (openai-whisper) で実行")
     print(f"[WHISPER] 入力ファイル: {audio_path}")
     print(f"[WHISPER] モデル: {model_name}")
     print(f"[WHISPER] 出力先: {OUTPUT_DIR}")
+
+    duration_sec = get_audio_duration_seconds(audio_path)
+    if progress_callback:
+        progress_callback({
+            "type": "transcribe_start",
+            "duration": duration_sec,
+            "message": "Whisper CLI で文字起こし中（進捗は推定できません。完了までお待ちください）",
+        })
+        progress_callback({
+            "type": "transcribe_segment",
+            "seconds_start": 0,
+            "seconds_end": 0,
+            "duration": duration_sec,
+            "percent": 50.0,
+            "preview": "",
+            "segment_index": 0,
+            "cli_mode": True,
+        })
 
     result = subprocess.run(
         ["whisper", audio_path, "--language", "Japanese", "--model", model_name, "--output_dir", str(OUTPUT_DIR)],
@@ -221,7 +309,14 @@ def _run_whisper_cli(audio_path: str, model_name: str = "medium", dictionary: Op
 
     with open(txt_path, "r", encoding="utf-8") as f:
         transcript = f.read().strip()
-    return apply_dictionary(transcript, dictionary or {})
+    transcript = apply_dictionary(transcript, dictionary or {})
+    if progress_callback:
+        progress_callback({
+            "type": "transcribe_done",
+            "duration": duration_sec,
+            "chars": len(transcript),
+        })
+    return transcript
 
 
 def build_prompt(tpl: dict, transcript: str) -> str:
@@ -574,6 +669,112 @@ def write_docx(data: dict, tpl: Optional[dict], is_freeform: bool, output_name: 
     return output_path
 
 
+def execute_pipeline_sync(
+    tmp_path: str,
+    original_filename: str,
+    whisper_model: str,
+    gpt_model: str,
+    template: str,
+    api_key: Optional[str],
+    ai_provider: str,
+    ollama_endpoint: str,
+    output_format: str,
+    progress_callback: Optional[Callable[[dict[str, Any]], None]] = None,
+) -> dict:
+    """音声→文字起こし→AI→ファイル出力の一連処理（同期）。進捗は progress_callback で通知"""
+    is_freeform = template == "__none__"
+
+    print(f"[INFO] 音声ファイル: {tmp_path}")
+    print(f"[INFO] モード: {'自由形式' if is_freeform else 'テンプレート'}")
+    print(f"[INFO] AIプロバイダー: {ai_provider}")
+    print(f"[INFO] 出力形式: {output_format}")
+
+    print(f"[INFO] Whisper開始 (モデル: {whisper_model})")
+    transcript = run_whisper(
+        tmp_path,
+        whisper_model,
+        dictionary=None,
+        progress_callback=progress_callback,
+    )
+    print(f"[INFO] 文字起こし完了: {len(transcript)}文字")
+
+    tpl = None
+    if is_freeform:
+        print(f"[INFO] 自由形式モード: テンプレートなしで議事録作成")
+        prompt = build_freeform_prompt(transcript)
+    else:
+        tpl = load_template(template)
+        print(f"[INFO] テンプレート読み込み: {tpl['name']}")
+        prompt = build_prompt(tpl, transcript)
+
+    if progress_callback:
+        progress_callback({"type": "ai_start", "message": "AIで要約・議事録を作成しています"})
+
+    if ai_provider == "ollama":
+        print(f"[INFO] Ollama呼び出し (モデル: {gpt_model}, エンドポイント: {ollama_endpoint})")
+        data = call_ollama(prompt, gpt_model, ollama_endpoint)
+        print(f"[INFO] Ollama応答受信（ローカル処理完了）")
+    elif ai_provider == "gemini":
+        print(f"[INFO] Gemini API呼び出し (モデル: {gpt_model})")
+        data = call_gemini(api_key, prompt, gpt_model)
+        print(f"[INFO] Gemini応答受信")
+    else:
+        print(f"[INFO] ChatGPT API呼び出し (モデル: {gpt_model})")
+        data = call_chatgpt(api_key, prompt, gpt_model)
+        print(f"[INFO] ChatGPT応答受信")
+
+    if progress_callback:
+        progress_callback({"type": "file_write_start", "message": "ファイルを書き出しています"})
+
+    base = os.path.splitext(original_filename)[0]
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    meeting_title = data.get("meeting_title", "議事録")
+    tpl_name = tpl["name"] if tpl else meeting_title
+
+    ext_map = {"excel": ".xlsx", "text": ".txt", "docx": ".docx"}
+    ext = ext_map.get(output_format, ".xlsx")
+    output_name = f"{tpl_name}_{base}_{timestamp}{ext}"
+
+    if output_format == "excel":
+        if is_freeform:
+            output_path = write_freeform_excel(data, output_name)
+        else:
+            output_path = write_excel(tpl, data, output_name)
+    elif output_format == "text":
+        output_path = write_text(data, tpl, is_freeform, output_name)
+    elif output_format == "docx":
+        output_path = write_docx(data, tpl, is_freeform, output_name)
+    else:
+        output_format = "excel"
+        output_name = f"{tpl_name}_{base}_{timestamp}.xlsx"
+        if is_freeform:
+            output_path = write_freeform_excel(data, output_name)
+        else:
+            output_path = write_excel(tpl, data, output_name)
+
+    if is_freeform:
+        summary_display = {
+            FREEFORM_LABELS.get(k, k): v
+            for k, v in data.items()
+            if v
+        }
+    else:
+        summary_display = data
+
+    format_labels = {"excel": "Excel", "text": "テキスト", "docx": "Word"}
+    print(f"[INFO] {format_labels.get(output_format, 'Excel')}生成完了: {output_path}")
+
+    return {
+        "success": True,
+        "filename": output_name,
+        "path": str(OUTPUT_DIR),
+        "transcript_length": len(transcript),
+        "transcript": transcript,
+        "summary": summary_display,
+        "sections": list(data.keys()),
+    }
+
+
 # ========================================
 # APIエンドポイント
 # ========================================
@@ -634,112 +835,125 @@ async def process_audio(
     output_format: "excel", "text", "docx"
     """
     tmp_path = None
-    is_freeform = (template == "__none__")
-    
+
     if ai_provider != "ollama" and not api_key:
         provider_name = "Gemini" if ai_provider == "gemini" else "OpenAI"
         raise HTTPException(status_code=400, detail=f"{provider_name} API Keyが必要です")
-    
+
     try:
-        # 一時ファイルに保存
         suffix = os.path.splitext(file.filename)[1]
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             content = await file.read()
             tmp.write(content)
             tmp_path = tmp.name
-        
+
         print(f"[INFO] 音声ファイル保存: {tmp_path} ({len(content)} bytes)")
-        print(f"[INFO] モード: {'自由形式' if is_freeform else 'テンプレート'}")
-        print(f"[INFO] AIプロバイダー: {ai_provider}")
-        print(f"[INFO] 出力形式: {output_format}")
-        
-        # 1. 文字起こし
-        print(f"[INFO] Whisper開始 (モデル: {whisper_model})")
-        transcript = run_whisper(tmp_path, whisper_model)
-        print(f"[INFO] 文字起こし完了: {len(transcript)}文字")
-        
-        # 2. プロンプト生成（モードに応じて分岐）
-        tpl = None
-        if is_freeform:
-            print(f"[INFO] 自由形式モード: テンプレートなしで議事録作成")
-            prompt = build_freeform_prompt(transcript)
-        else:
-            tpl = load_template(template)
-            print(f"[INFO] テンプレート読み込み: {tpl['name']}")
-            prompt = build_prompt(tpl, transcript)
-        
-        # 3. AI API呼び出し（プロバイダーに応じて切替）
-        if ai_provider == "ollama":
-            print(f"[INFO] Ollama呼び出し (モデル: {gpt_model}, エンドポイント: {ollama_endpoint})")
-            data = call_ollama(prompt, gpt_model, ollama_endpoint)
-            print(f"[INFO] Ollama応答受信（ローカル処理完了）")
-        elif ai_provider == "gemini":
-            print(f"[INFO] Gemini API呼び出し (モデル: {gpt_model})")
-            data = call_gemini(api_key, prompt, gpt_model)
-            print(f"[INFO] Gemini応答受信")
-        else:
-            print(f"[INFO] ChatGPT API呼び出し (モデル: {gpt_model})")
-            data = call_chatgpt(api_key, prompt, gpt_model)
-            print(f"[INFO] ChatGPT応答受信")
-        
-        # 4. ファイル生成（出力形式・モードに応じて分岐）
-        base = os.path.splitext(file.filename)[0]
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        meeting_title = data.get("meeting_title", "議事録")
-        tpl_name = tpl["name"] if tpl else meeting_title
-        
-        ext_map = {"excel": ".xlsx", "text": ".txt", "docx": ".docx"}
-        ext = ext_map.get(output_format, ".xlsx")
-        output_name = f"{tpl_name}_{base}_{timestamp}{ext}"
-        
-        if output_format == "excel":
-            if is_freeform:
-                output_path = write_freeform_excel(data, output_name)
-            else:
-                output_path = write_excel(tpl, data, output_name)
-        elif output_format == "text":
-            output_path = write_text(data, tpl, is_freeform, output_name)
-        elif output_format == "docx":
-            output_path = write_docx(data, tpl, is_freeform, output_name)
-        else:
-            output_format = "excel"
-            output_name = f"{tpl_name}_{base}_{timestamp}.xlsx"
-            if is_freeform:
-                output_path = write_freeform_excel(data, output_name)
-            else:
-                output_path = write_excel(tpl, data, output_name)
-        
-        if is_freeform:
-            summary_display = {
-                FREEFORM_LABELS.get(k, k): v
-                for k, v in data.items()
-                if v
-            }
-        else:
-            summary_display = data
-        
-        format_labels = {"excel": "Excel", "text": "テキスト", "docx": "Word"}
-        print(f"[INFO] {format_labels.get(output_format, 'Excel')}生成完了: {output_path}")
-        
-        return {
-            "success": True,
-            "filename": output_name,
-            "path": str(OUTPUT_DIR),
-            "transcript_length": len(transcript),
-            "transcript": transcript,
-            "summary": summary_display,
-            "sections": list(data.keys())
-        }
-        
+
+        return execute_pipeline_sync(
+            tmp_path,
+            file.filename,
+            whisper_model,
+            gpt_model,
+            template,
+            api_key,
+            ai_provider,
+            ollama_endpoint,
+            output_format,
+            progress_callback=None,
+        )
+
     except HTTPException:
         raise
     except Exception as e:
         print(f"[ERROR] {type(e).__name__}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        # 一時ファイル削除
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
+
+
+@app.post("/api/process-stream")
+async def process_audio_stream(
+    file: UploadFile = File(...),
+    whisper_model: str = Form("medium"),
+    gpt_model: str = Form("gpt-4o-mini"),
+    template: str = Form("shozokucho.json"),
+    api_key: Optional[str] = Form(None),
+    ai_provider: str = Form("openai"),
+    ollama_endpoint: str = Form("http://localhost:11434"),
+    output_format: str = Form("excel"),
+):
+    """
+    処理中に NDJSON で進捗をストリーミング（文字起こし位置・プレビュー等）。
+    最終行は type: done と result を含む。
+    """
+    if ai_provider != "ollama" and not api_key:
+        provider_name = "Gemini" if ai_provider == "gemini" else "OpenAI"
+        raise HTTPException(status_code=400, detail=f"{provider_name} API Keyが必要です")
+
+    suffix = os.path.splitext(file.filename)[1]
+    content = await file.read()
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(content)
+        tmp_path = tmp.name
+
+    original_filename = file.filename or "audio"
+
+    def ndjson_generator():
+        q: Queue = Queue()
+        sentinel = object()
+
+        def worker():
+            try:
+                result = execute_pipeline_sync(
+                    tmp_path,
+                    original_filename,
+                    whisper_model,
+                    gpt_model,
+                    template,
+                    api_key,
+                    ai_provider,
+                    ollama_endpoint,
+                    output_format,
+                    progress_callback=lambda ev: q.put(ev),
+                )
+                q.put({"type": "done", "result": result})
+            except HTTPException as he:
+                detail = he.detail
+                if not isinstance(detail, str):
+                    detail = str(detail)
+                q.put({"type": "error", "detail": detail})
+            except Exception as e:
+                print(f"[ERROR] stream pipeline: {type(e).__name__}: {e}")
+                q.put({"type": "error", "detail": str(e)})
+            finally:
+                q.put(sentinel)
+                if os.path.exists(tmp_path):
+                    try:
+                        os.unlink(tmp_path)
+                    except OSError:
+                        pass
+
+        threading.Thread(target=worker, daemon=True).start()
+
+        while True:
+            try:
+                item = q.get(timeout=0.3)
+            except Empty:
+                yield (json.dumps({"type": "ping"}, ensure_ascii=False) + "\n").encode("utf-8")
+                continue
+            if item is sentinel:
+                break
+            yield (json.dumps(item, ensure_ascii=False) + "\n").encode("utf-8")
+
+    return StreamingResponse(
+        ndjson_generator(),
+        media_type="application/x-ndjson",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 def _get_media_type(filename: str) -> str:
