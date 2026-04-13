@@ -3,250 +3,27 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>テンプレート管理 | Minutes Maker</title>
+    <title>テンプレート管理 | 議事録メーカー</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700&family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="static/style.css">
-    <style>
-        .template-manager {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-        
-        .back-link {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            color: var(--accent-primary);
-            text-decoration: none;
-            margin-bottom: 20px;
-        }
-        
-        .back-link:hover {
-            text-decoration: underline;
-        }
-        
-        .step-indicator {
-            display: flex;
-            justify-content: center;
-            gap: 40px;
-            margin-bottom: 40px;
-        }
-        
-        .step-item {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 10px;
-            opacity: 0.4;
-        }
-        
-        .step-item.active {
-            opacity: 1;
-        }
-        
-        .step-item.completed {
-            opacity: 1;
-        }
-        
-        .step-number {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            background: var(--bg-secondary);
-            border: 2px solid var(--border-color);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-        }
-        
-        .step-item.active .step-number {
-            border-color: var(--accent-primary);
-            background: var(--accent-primary);
-            color: var(--bg-primary);
-        }
-        
-        .step-item.completed .step-number {
-            border-color: var(--accent-success);
-            background: var(--accent-success);
-            color: var(--bg-primary);
-        }
-        
-        .step-content {
-            display: none;
-        }
-        
-        .step-content.active {
-            display: block;
-        }
-        
-        .excel-preview {
-            background: var(--bg-secondary);
-            border-radius: var(--radius-md);
-            padding: 20px;
-            margin: 20px 0;
-            overflow-x: auto;
-        }
-        
-        .excel-grid {
-            display: grid;
-            gap: 1px;
-            background: var(--border-color);
-            border: 1px solid var(--border-color);
-            border-radius: var(--radius-sm);
-            overflow: hidden;
-        }
-        
-        .excel-cell {
-            background: var(--bg-card);
-            padding: 8px 12px;
-            min-width: 100px;
-            font-size: 0.85rem;
-        }
-        
-        .excel-cell.header {
-            background: var(--bg-secondary);
-            font-weight: 500;
-            color: var(--accent-primary);
-        }
-        
-        .excel-cell.selectable {
-            cursor: pointer;
-            transition: var(--transition-fast);
-        }
-        
-        .excel-cell.selectable:hover {
-            background: rgba(0, 245, 212, 0.1);
-        }
-        
-        .excel-cell.selected {
-            background: rgba(0, 245, 212, 0.2);
-            border: 2px solid var(--accent-primary);
-        }
-        
-        .section-list {
-            display: flex;
-            flex-direction: column;
-            gap: 15px;
-            margin: 20px 0;
-        }
-        
-        .section-item {
-            display: grid;
-            grid-template-columns: 1fr 1fr 100px auto;
-            gap: 15px;
-            align-items: center;
-            background: var(--bg-secondary);
-            padding: 15px;
-            border-radius: var(--radius-sm);
-        }
-        
-        .section-item input {
-            width: 100%;
-        }
-        
-        .cell-badge {
-            background: var(--accent-primary);
-            color: var(--bg-primary);
-            padding: 5px 10px;
-            border-radius: var(--radius-sm);
-            font-family: monospace;
-            font-weight: bold;
-        }
-        
-        .add-section-btn {
-            width: 100%;
-            padding: 15px;
-            border: 2px dashed var(--border-color);
-            background: transparent;
-            color: var(--text-secondary);
-            border-radius: var(--radius-sm);
-            cursor: pointer;
-            transition: var(--transition-fast);
-        }
-        
-        .add-section-btn:hover {
-            border-color: var(--accent-primary);
-            color: var(--accent-primary);
-        }
-        
-        .style-rules {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-        
-        .style-rule {
-            display: flex;
-            gap: 10px;
-            align-items: center;
-        }
-        
-        .style-rule input {
-            flex: 1;
-        }
-        
-        .preview-card {
-            background: var(--bg-card);
-            border: 1px solid var(--border-color);
-            border-radius: var(--radius-md);
-            padding: 20px;
-            margin: 20px 0;
-        }
-        
-        .preview-section {
-            margin-bottom: 15px;
-            padding-bottom: 15px;
-            border-bottom: 1px solid var(--border-color);
-        }
-        
-        .preview-section:last-child {
-            margin-bottom: 0;
-            padding-bottom: 0;
-            border-bottom: none;
-        }
-        
-        .preview-label {
-            font-size: 0.85rem;
-            color: var(--text-secondary);
-            margin-bottom: 5px;
-        }
-        
-        .preview-value {
-            font-size: 1rem;
-            color: var(--text-primary);
-        }
-        
-        .btn-group {
-            display: flex;
-            gap: 15px;
-            margin-top: 30px;
-        }
-        
-        .success-message {
-            text-align: center;
-            padding: 40px;
-        }
-        
-        .success-icon {
-            font-size: 4rem;
-            margin-bottom: 20px;
-        }
-    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
+<body class="page-template-manager">
+    <div class="app-shell">
+        <header class="app-nav">
+            <a href="/" class="nav-brand">議事録メーカー</a>
+            <nav class="nav-links" aria-label="サイト内">
+                <a href="/" class="nav-link">ホーム</a>
+                <a href="/settings" class="nav-link">設定</a>
+                <a href="/template-manager" class="nav-link is-active">テンプレート</a>
+            </nav>
+        </header>
+
     <div class="template-manager">
-        <a href="/" class="back-link">← メインページに戻る</a>
-        
-        <header class="header">
-            <div class="logo">
-                <span class="logo-icon">📋</span>
-                <h1>テンプレート管理</h1>
-            </div>
-            <p class="tagline">Excelテンプレートをアップロードして議事録フォーマットを設定</p>
+        <header class="header template-manager-head">
+            <h1 class="template-manager-title">テンプレート管理</h1>
+            <p class="tagline">Excelをアップロードし、議事録の出力項目を設定します</p>
         </header>
         
         <!-- ステップインジケーター -->
@@ -269,22 +46,21 @@
         <div class="step-content active" id="step-1">
             <div class="card">
                 <h2 class="card-title">
-                    <span class="icon">📤</span>
+                    <span class="icon" aria-hidden="true"></span>
                     Excelテンプレートをアップロード
                 </h2>
                 
                 <div class="upload-zone" id="excel-upload-zone">
                     <div class="upload-content">
-                        <div class="upload-icon">📊</div>
+                        <div class="upload-visual" aria-hidden="true"></div>
                         <h3>Excelファイルをドロップ</h3>
                         <p>または<span class="browse-link">ファイルを選択</span></p>
                         <input type="file" id="excel-file" accept=".xlsx,.xls" hidden />
                     </div>
                 </div>
                 
-                <p style="margin-top: 15px; color: var(--text-muted); font-size: 0.9rem;">
-                    💡 ヒント: 議事録として使用したいExcelファイルをそのままアップロードしてください。
-                    フォーマットは完全に保持されます。
+                <p class="tm-hint">
+                    議事録の元にしたいExcelをそのままアップロードしてください。書式は保持されます。
                 </p>
             </div>
         </div>
@@ -293,12 +69,12 @@
         <div class="step-content" id="step-2">
             <div class="card">
                 <h2 class="card-title">
-                    <span class="icon">✏️</span>
+                    <span class="icon" aria-hidden="true"></span>
                     入力フィールドを設定
                 </h2>
                 
-                <p style="margin-bottom: 20px;">
-                    AIが入力する項目を設定してください。各項目に対応するセル位置を指定します。
+                <p class="tm-lead">
+                    出力に含める項目を設定します。各項目に対応するセル位置を指定します。
                 </p>
                 
                 <div class="form-group">
@@ -306,35 +82,35 @@
                     <input type="text" id="template-name" placeholder="例: 所属長会議" />
                 </div>
                 
-                <h3 style="margin: 25px 0 15px;">入力フィールド</h3>
+                <h3 class="tm-section-title">入力フィールド</h3>
                 
                 <div class="section-list" id="section-list">
                     <!-- 動的に追加される -->
                 </div>
                 
-                <button class="add-section-btn" id="add-section-btn">
-                    ➕ フィールドを追加
+                <button type="button" class="add-section-btn" id="add-section-btn">
+                    フィールドを追加
                 </button>
                 
-                <h3 style="margin: 30px 0 15px;">スタイルルール（AIへの指示）</h3>
+                <h3 class="tm-section-title">スタイルルール（生成時の指示）</h3>
                 
                 <div class="style-rules" id="style-rules">
                     <div class="style-rule">
                         <input type="text" value="重複や雑談は除外" />
-                        <button class="icon-btn remove-rule">✕</button>
+                        <button type="button" class="icon-btn remove-rule" title="削除">削除</button>
                     </div>
                     <div class="style-rule">
                         <input type="text" value="箇条書き" />
-                        <button class="icon-btn remove-rule">✕</button>
+                        <button type="button" class="icon-btn remove-rule" title="削除">削除</button>
                     </div>
                     <div class="style-rule">
                         <input type="text" value="決定事項・課題・次アクションがあれば必ず含める" />
-                        <button class="icon-btn remove-rule">✕</button>
+                        <button type="button" class="icon-btn remove-rule" title="削除">削除</button>
                     </div>
                 </div>
                 
-                <button class="btn btn-ghost" id="add-rule-btn" style="margin-top: 10px;">
-                    ➕ ルールを追加
+                <button type="button" class="btn btn-ghost tm-rule-add" id="add-rule-btn">
+                    ルールを追加
                 </button>
                 
                 <div class="btn-group">
@@ -348,28 +124,28 @@
         <div class="step-content" id="step-3">
             <div class="card">
                 <h2 class="card-title">
-                    <span class="icon">✅</span>
+                    <span class="icon" aria-hidden="true"></span>
                     設定の確認
                 </h2>
                 
                 <div class="preview-card">
                     <h3 id="preview-name">テンプレート名</h3>
-                    <p style="color: var(--text-muted); margin-bottom: 20px;" id="preview-excel">Excel: </p>
+                    <p class="preview-excel-meta" id="preview-excel">Excel: </p>
                     
-                    <h4 style="margin-bottom: 15px;">入力フィールド</h4>
+                    <h4 class="tm-fields-heading">入力フィールド</h4>
                     <div id="preview-sections">
                         <!-- 動的に追加 -->
                     </div>
                     
-                    <h4 style="margin: 20px 0 15px;">スタイルルール</h4>
-                    <ul id="preview-rules" style="padding-left: 20px; color: var(--text-secondary);">
+                    <h4 class="tm-rules-heading">スタイルルール</h4>
+                    <ul id="preview-rules" class="preview-rules-list">
                         <!-- 動的に追加 -->
                     </ul>
                 </div>
                 
                 <div class="btn-group">
                     <button class="btn btn-secondary" id="back-to-step-2">← 戻る</button>
-                    <button class="btn btn-primary" id="save-template">💾 テンプレートを保存</button>
+                    <button type="button" class="btn btn-primary" id="save-template">テンプレートを保存</button>
                 </div>
             </div>
         </div>
@@ -378,18 +154,19 @@
         <div class="step-content" id="step-complete">
             <div class="card">
                 <div class="success-message">
-                    <div class="success-icon">🎉</div>
+                    <div class="success-icon success-icon-plain" aria-hidden="true">完了</div>
                     <h2>テンプレートを保存しました！</h2>
-                    <p style="color: var(--text-secondary); margin: 20px 0;">
+                    <p class="tm-success-lead">
                         新しいテンプレートがメインページで選択できるようになりました。
                     </p>
-                    <div class="btn-group" style="justify-content: center;">
+                    <div class="btn-group btn-group-center">
                         <a href="/" class="btn btn-primary">メインページへ</a>
                         <button class="btn btn-secondary" onclick="location.reload()">別のテンプレートを追加</button>
                     </div>
                 </div>
             </div>
         </div>
+    </div>
     </div>
     
     <script>
@@ -511,7 +288,7 @@
                     <input type="text" class="section-label" value="${section.label}" placeholder="ラベル名" />
                     <input type="text" class="section-key" value="${section.key}" placeholder="キー（英数字）" />
                     <span class="cell-badge">${section.cell}</span>
-                    <button class="icon-btn remove-section" title="削除">✕</button>
+                    <button type="button" class="icon-btn remove-section" title="削除">削除</button>
                 </div>
             `).join('');
             
@@ -560,7 +337,7 @@
             div.className = 'style-rule';
             div.innerHTML = `
                 <input type="text" placeholder="ルールを入力" />
-                <button class="icon-btn remove-rule">✕</button>
+                <button type="button" class="icon-btn remove-rule" title="削除">削除</button>
             `;
             container.appendChild(div);
             

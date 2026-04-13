@@ -46,10 +46,10 @@ chmod +x scripts/setup_mac.sh
 2. Python 3, ffmpeg のインストール
 3. Python 仮想環境の作成と依存パッケージのインストール
 4. Ollama のインストールと起動
-5. gemma3 モデルのダウンロード（約 3GB）
+5. gemma4 モデルのダウンロード（サイズはモデルにより異なります）
 6. アプリ起動とブラウザ表示
 
-**gemma3 のダウンロードに数分〜数十分かかります。** 途中で止まっているように見えても、ダウンロードが進行中なので待ってください。
+**gemma4 のダウンロードに数分〜数十分かかります。** 途中で止まっているように見えても、ダウンロードが進行中なので待ってください。
 
 ---
 
@@ -70,8 +70,10 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 2. ffmpeg のインストール（winget 使用）
 3. Python 仮想環境の作成と依存パッケージのインストール
 4. Ollama のインストールと起動
-5. gemma3 モデルのダウンロード（約 3GB）
+5. gemma4 モデルのダウンロード（サイズはモデルにより異なります）
 6. アプリ起動とブラウザ表示
+
+**gemma4 のダウンロードに数分〜数十分かかります。** 途中で止まっているように見えても、ダウンロードが進行中なので待ってください。
 
 ---
 
@@ -119,9 +121,9 @@ Start-Process ollama -ArgumentList "serve" -WindowStyle Hidden
 ```
 起動後、3〜5秒待ってから再試行してください。
 
-### gemma3 のダウンロードが途中で止まった
+### gemma4 のダウンロードが途中で止まった
 ```bash
-ollama pull gemma3
+ollama pull gemma4
 ```
 再実行すれば途中から再開されます。
 

@@ -119,12 +119,12 @@ fi
 # 6. LLM モデルダウンロード
 # ------------------------------------------
 log "Ollama モデルを確認中..."
-if ollama list 2>/dev/null | grep -q "gemma3"; then
-    ok "gemma3 モデル ダウンロード済み"
+if ollama list 2>/dev/null | grep -q "gemma4"; then
+    ok "gemma4 モデル ダウンロード済み"
 else
-    log "gemma3 モデルをダウンロード中（約3GB、数分〜数十分かかります）..."
-    ollama pull gemma3
-    ok "gemma3 モデル ダウンロード完了"
+    log "gemma4 モデルをダウンロード中（サイズはモデルにより異なります。数分〜数十分かかることがあります）..."
+    ollama pull gemma4
+    ok "gemma4 モデル ダウンロード完了"
 fi
 
 # ------------------------------------------

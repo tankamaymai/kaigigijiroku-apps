@@ -93,6 +93,11 @@ function formatTime(date = new Date()) {
 }
 
 function log(message, type = 'info') {
+    if (!elements.logContent) {
+        if (type === 'error') console.error(message);
+        else console.log(message);
+        return;
+    }
     const entry = document.createElement('div');
     entry.className = `log-entry ${type}`;
     entry.innerHTML = `
@@ -104,6 +109,7 @@ function log(message, type = 'info') {
 }
 
 function clearLog() {
+    if (!elements.logContent) return;
     elements.logContent.innerHTML = '';
     log('ログをクリアしました', 'info');
 }
@@ -139,6 +145,7 @@ function loadSettings() {
 }
 
 function saveSettings() {
+    if (!elements.aiProviderSelect) return;
     state.aiProvider = elements.aiProviderSelect.value;
     state.apiKey = elements.apiKeyInput.value;
     state.geminiApiKey = elements.geminiApiKeyInput.value;
@@ -234,7 +241,7 @@ function switchProvider(provider) {
     const modelLabel = document.getElementById('model-label');
     if (modelLabel) {
         const labels = { ollama: 'Ollamaモデル', openai: 'GPTモデル', gemini: 'Geminiモデル' };
-        modelLabel.textContent = labels[provider] || 'AIモデル';
+        modelLabel.textContent = labels[provider] || 'モデル';
     }
     
     if (provider === 'ollama') {
@@ -263,14 +270,14 @@ async function refreshOllamaModels() {
     const statusIcon = document.getElementById('ollama-status-icon');
     const statusText = document.getElementById('ollama-status-text');
     
-    if (statusIcon) statusIcon.textContent = '⏳';
+    if (statusIcon) statusIcon.textContent = '';
     if (statusText) statusText.textContent = '接続確認中...';
     
     try {
         const resp = await fetch(`/api/ollama/models?endpoint=${encodeURIComponent(endpoint)}`);
         
         if (!resp.ok) {
-            if (statusIcon) statusIcon.textContent = '❌';
+            if (statusIcon) statusIcon.textContent = '×';
             if (statusText) statusText.textContent = 'Ollamaに接続できません';
             log('Ollamaに接続できません。ollama serve で起動してください。', 'error');
             return;
@@ -284,9 +291,9 @@ async function refreshOllamaModels() {
         
         if (data.models.length === 0) {
             select.innerHTML = '<option value="">モデルがありません</option>';
-            if (statusIcon) statusIcon.textContent = '⚠️';
+            if (statusIcon) statusIcon.textContent = '!';
             if (statusText) statusText.textContent = '接続OK（モデルなし）';
-            log('Ollamaにモデルがインストールされていません。ollama pull gemma3 等でインストールしてください。', 'error');
+            log('Ollamaにモデルがインストールされていません。ollama pull gemma4 等でインストールしてください。', 'error');
             return;
         }
         
@@ -301,12 +308,12 @@ async function refreshOllamaModels() {
             select.appendChild(opt);
         });
         
-        if (statusIcon) statusIcon.textContent = '✅';
+        if (statusIcon) statusIcon.textContent = 'OK';
         if (statusText) statusText.textContent = `接続OK（${data.models.length}モデル）`;
         log(`Ollama接続OK: ${data.models.length}モデル利用可能`, 'success');
         
     } catch (e) {
-        if (statusIcon) statusIcon.textContent = '❌';
+        if (statusIcon) statusIcon.textContent = '×';
         if (statusText) statusText.textContent = '接続エラー';
         console.error('Ollama接続エラー:', e);
     }
@@ -430,7 +437,7 @@ function removeFile() {
 
 function updateRunButton() {
     const canRun = state.selectedFile && !state.isProcessing;
-    elements.runBtn.disabled = !canRun;
+    if (elements.runBtn) elements.runBtn.disabled = !canRun;
 }
 
 // ========================================
@@ -447,8 +454,6 @@ async function loadTemplates() {
         
         if (!templateList) return;
         
-        const icons = ['🏥', '📋', '📝', '📊', '📄', '🗂️', '📑', '🗒️'];
-        
         templateList.innerHTML = '';
         
         // 「テンプレートなし」を先頭に追加
@@ -456,10 +461,10 @@ async function loadTemplates() {
         freeformItem.className = 'template-item active';
         freeformItem.dataset.template = '__none__';
         freeformItem.innerHTML = `
-            <div class="template-icon">✨</div>
+            <div class="template-icon"><span class="template-icon-letter">無</span></div>
             <div class="template-info">
                 <h3>テンプレートなし</h3>
-                <p>AIが自動で議事録を構成</p>
+                <p>既定の形式で出力</p>
             </div>
             <span class="check-mark">✓</span>
         `;
@@ -468,12 +473,13 @@ async function loadTemplates() {
         
         // 既存テンプレートを追加
         if (data.templates && data.templates.length > 0) {
-            data.templates.forEach((tpl, index) => {
+            data.templates.forEach((tpl) => {
                 const item = document.createElement('div');
                 item.className = 'template-item';
                 item.dataset.template = tpl.filename;
+                const letter = Array.from(tpl.name || '文')[0] || '文';
                 item.innerHTML = `
-                    <div class="template-icon">${icons[index % icons.length]}</div>
+                    <div class="template-icon"><span class="template-icon-letter">${letter}</span></div>
                     <div class="template-info">
                         <h3>${tpl.name}</h3>
                         <p>${tpl.sections.length}項目</p>
@@ -597,17 +603,20 @@ function applyTranscribeStreamEvent(ev) {
 }
 
 function showProgress() {
+    if (!elements.progressCard) return;
     elements.progressCard.classList.remove('hidden');
-    elements.resultCard.classList.add('hidden');
+    if (elements.resultCard) elements.resultCard.classList.add('hidden');
     resetTranscribeDetailUI();
 }
 
 function hideProgress() {
+    if (!elements.progressCard) return;
     elements.progressCard.classList.add('hidden');
     resetTranscribeDetailUI();
 }
 
 function updateProgress(percent, title, currentStep) {
+    if (!elements.progressPercent || !elements.progressTitle || !elements.progressFill) return;
     elements.progressPercent.textContent = `${percent}%`;
     elements.progressTitle.textContent = title;
     elements.progressFill.style.width = `${percent}%`;
@@ -633,9 +642,10 @@ function updateProgress(percent, title, currentStep) {
 
 function showResult(filename, path) {
     hideProgress();
+    if (!elements.resultCard) return;
     elements.resultCard.classList.remove('hidden');
-    elements.resultFilename.textContent = filename;
-    elements.resultPath.textContent = path;
+    if (elements.resultFilename) elements.resultFilename.textContent = filename;
+    if (elements.resultPath) elements.resultPath.textContent = path;
 }
 
 // ========================================
@@ -728,12 +738,12 @@ async function runPipeline() {
     showProgress();
     
     log('='.repeat(40), 'info');
-    log('🚀 議事録作成を開始します', 'info');
+    log('議事録の作成を開始します', 'info');
     
     try {
         // Step 1: 文字起こし
-        updateProgress(5, '🎙️ 音声を文字起こし中...', 1);
-        log(`🎙️ Whisperで文字起こし開始 (モデル: ${state.whisperModel})`, 'info');
+        updateProgress(5, '音声を文字起こし中…', 1);
+        log(`Whisperで文字起こし開始（モデル: ${state.whisperModel}）`, 'info');
 
         const formData = new FormData();
         formData.append('file', state.selectedFile);
@@ -752,35 +762,35 @@ async function runPipeline() {
             applyTranscribeStreamEvent(ev);
             if (ev.type === 'transcribe_segment' && !ev.cli_mode && typeof ev.percent === 'number') {
                 const overall = 5 + (ev.percent / 100) * 42;
-                updateProgress(Math.round(overall), '🎙️ 文字起こし中...', 1);
+                updateProgress(Math.round(overall), '文字起こし中…', 1);
             }
             if (ev.type === 'transcribe_start') {
-                updateProgress(8, '🎙️ 文字起こしを準備中...', 1);
+                updateProgress(8, '文字起こしを準備中…', 1);
             }
             if (ev.type === 'ai_start') {
-                updateProgress(55, '🤖 AI要約中...', 2);
+                updateProgress(55, '要約・整形中…', 2);
             }
             if (ev.type === 'file_write_start') {
-                updateProgress(88, '📄 ファイル生成中...', 3);
+                updateProgress(88, 'ファイルを出力中…', 3);
             }
         });
         
         const providerLabels = { ollama: 'Ollama（ローカル）', gemini: 'Gemini', openai: 'ChatGPT' };
         const providerLabel = providerLabels[state.aiProvider] || 'AI';
         
-        // Step 2: AI要約完了
-        updateProgress(70, '🤖 AI要約完了', 2);
-        log(`✅ ${providerLabel}応答を受信`, 'success');
+        // Step 2: 要約完了
+        updateProgress(70, '要約・整形が完了しました', 2);
+        log(`${providerLabel}から応答を受信しました`, 'success');
         
         // Step 3: ファイル生成完了
         const outputFormat = elements.outputFormatSelect?.value || state.outputFormat;
         const formatLabels = { excel: 'Excel', text: 'テキスト', docx: 'Word' };
         const formatLabel = formatLabels[outputFormat] || 'ファイル';
-        updateProgress(100, `📄 ${formatLabel}生成完了`, 3);
-        log(`✅ ${formatLabel}出力完了: ${result.filename}`, 'success');
+        updateProgress(100, `${formatLabel}の出力が完了しました`, 3);
+        log(`${formatLabel}出力完了: ${result.filename}`, 'success');
         
         log('='.repeat(40), 'info');
-        log('🎉 議事録作成が完了しました！', 'success');
+        log('議事録の作成が完了しました', 'success');
         
         // 文字起こし結果を表示
         if (result.transcript) {
@@ -788,7 +798,7 @@ async function runPipeline() {
             if (transcriptText) {
                 transcriptText.textContent = result.transcript;
             }
-            log(`📝 文字起こし: ${result.transcript_length}文字`, 'info');
+            log(`文字起こし: ${result.transcript_length}文字`, 'info');
         }
         
         // AI要約結果を表示
@@ -816,7 +826,7 @@ async function runPipeline() {
         };
         
     } catch (error) {
-        log(`❌ エラー: ${error.message}`, 'error');
+        log(`エラー: ${error.message}`, 'error');
         hideProgress();
         alert(`エラー: ${error.message}`);
     } finally {
@@ -840,39 +850,39 @@ async function runDemoMode() {
     showProgress();
     
     log('='.repeat(40), 'info');
-    log('🚀 議事録作成を開始します', 'info');
+    log('議事録の作成を開始します', 'info');
     
     // Step 1
-    updateProgress(10, '🎙️ 音声を文字起こし中...', 1);
-    log(`🎙️ Whisperで文字起こし開始 (モデル: ${state.whisperModel})`, 'info');
+    updateProgress(10, '音声を文字起こし中…', 1);
+    log(`Whisperで文字起こし開始（モデル: ${state.whisperModel}）`, 'info');
     await sleep(2000);
     
-    updateProgress(30, '🎙️ 文字起こし中...', 1);
-    log('📝 文字起こし処理中...', 'info');
+    updateProgress(30, '文字起こし中…', 1);
+    log('文字起こし処理中…', 'info');
     await sleep(1500);
     
-    log('✅ 文字起こし完了 (2,450文字)', 'success');
+    log('文字起こし完了（2,450文字）', 'success');
     
     // Step 2
-    updateProgress(50, '🤖 AI要約中...', 2);
-    log('🤖 ChatGPT APIで議事録作成中...', 'info');
+    updateProgress(50, '要約・整形中…', 2);
+    log('ChatGPT APIで議事録を作成中…', 'info');
     await sleep(2000);
     
-    log('✅ ChatGPT応答を受信', 'success');
-    updateProgress(70, '🤖 AI要約完了', 2);
+    log('ChatGPTから応答を受信しました', 'success');
+    updateProgress(70, '要約・整形が完了しました', 2);
     
     // Step 3
-    updateProgress(85, '📊 Excel生成中...', 3);
-    log('📊 Excelファイル生成中...', 'info');
+    updateProgress(85, 'Excelを生成中…', 3);
+    log('Excelファイルを生成中…', 'info');
     await sleep(1000);
     
     const filename = `所属長会議_${state.selectedFile.name.split('.')[0]}_${new Date().toISOString().slice(0,10)}.xlsx`;
     
-    updateProgress(100, '📊 Excel生成完了', 3);
-    log(`✅ Excel出力完了: ${filename}`, 'success');
+    updateProgress(100, 'Excelの出力が完了しました', 3);
+    log(`Excel出力完了: ${filename}`, 'success');
     
     log('='.repeat(40), 'info');
-    log('🎉 議事録作成が完了しました！', 'success');
+    log('議事録の作成が完了しました', 'success');
     
     showResult(filename, 'output/');
     
@@ -965,7 +975,7 @@ function setupEventListeners() {
     if (elements.openFolderBtn) {
         elements.openFolderBtn.addEventListener('click', () => {
             fetch('/api/open-folder', { method: 'POST' });
-            log('📁 出力フォルダを開きました', 'info');
+            log('出力フォルダを開きました', 'info');
         });
     }
 }
@@ -976,16 +986,25 @@ function setupEventListeners() {
 
 async function init() {
     console.log('Initializing Minutes Maker...');
-    
+
     initElements();
+    const page = document.body.dataset.page || 'home';
     loadSettings();
+
+    if (page === 'settings') {
+        await loadDictionary();
+        await loadTemplates();
+        setupEventListeners();
+        console.log('Settings page initialized');
+        return;
+    }
+
     setupFileUpload();
-    await loadTemplates();  // テンプレートを動的に読み込む
+    await loadTemplates();
     await loadDictionary();
     setupEventListeners();
     updateRunButton();
-    
-    log('システム準備完了', 'success');
+
     console.log('Minutes Maker initialized successfully');
 }
 

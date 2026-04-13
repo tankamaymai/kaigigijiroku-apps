@@ -126,12 +126,12 @@ try {
 # ------------------------------------------
 Log "Ollama モデルを確認中..."
 $models = ollama list 2>&1
-if ($models -match "gemma3") {
-    Ok "gemma3 モデル ダウンロード済み"
+if ($models -match "gemma4") {
+    Ok "gemma4 モデル ダウンロード済み"
 } else {
-    Log "gemma3 モデルをダウンロード中（約3GB、数分〜数十分かかります）..."
-    ollama pull gemma3
-    Ok "gemma3 モデル ダウンロード完了"
+    Log "gemma4 モデルをダウンロード中（サイズはモデルにより異なります。数分〜数十分かかることがあります）..."
+    ollama pull gemma4
+    Ok "gemma4 モデル ダウンロード完了"
 }
 
 # ------------------------------------------

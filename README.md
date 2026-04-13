@@ -22,9 +22,15 @@
 
 - Python 3.9以上
 - ffmpeg
-- Whisper
+- Whisper（初回実行時に自動ダウンロード）
+- **Ollama**（ローカルLLM用。デフォルトで議事録生成に使用）
+- **gemma4** モデル（`ollama pull` で取得。サイズにより数分〜数十分かかることがあります）
 
 ## 🚀 セットアップ
+
+**全自動:** Mac は `./scripts/setup_mac.sh`、Windows は `.\scripts\setup_windows.ps1` を実行すると、Ollama の導入・起動と **gemma4 のダウンロード**（`ollama pull gemma4`）まで行います。詳細は `SETUP.md` を参照してください。
+
+手動で進める場合の例（Mac）:
 
 ### 1. ffmpegをインストール
 
@@ -35,7 +41,7 @@ brew install ffmpeg
 ### 2. Python仮想環境を作成
 
 ```bash
-cd kaigi-app
+cd /path/to/kaigigijiroku-apps
 python3 -m venv venv
 source venv/bin/activate
 ```
@@ -46,13 +52,21 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
+### 4. Ollama と gemma4（ローカルLLM）
+
+1. [Ollama](https://ollama.com/) をインストールする（Mac 例: `brew install ollama`）
+2. ターミナルでサーバーを起動: `ollama serve`（別ターミナルで続行するか、バックグラウンドで起動）
+3. モデルを取得: `ollama pull gemma4`
+
+`gemma4` のダウンロードが完了するまで数分〜数十分かかることがあります。途中で止まった場合は `ollama pull gemma4` を再実行すると再開されます。
+
 ## 💻 使い方
 
 ### アプリを起動
 
 ```bash
 source venv/bin/activate
-python meeting_app.py
+python server.py
 ```
 
 ### 操作手順

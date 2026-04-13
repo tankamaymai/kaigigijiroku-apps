@@ -64,9 +64,6 @@ app = FastAPI(
     version="2.0.0"
 )
 
-# 静的ファイル配信
-app.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
-
 
 # ========================================
 # ユーティリティ関数
@@ -525,7 +522,7 @@ def call_gemini(api_key: str, prompt: str, model: str = "gemini-2.0-flash") -> d
     return parse_ai_response(content, "Gemini")
 
 
-def call_ollama(prompt: str, model: str = "gemma3", endpoint: str = "http://localhost:11434") -> dict:
+def call_ollama(prompt: str, model: str = "gemma4", endpoint: str = "http://localhost:11434") -> dict:
     """Ollama（ローカルLLM）を呼び出し。データは外部に送信されない。"""
     api_url = f"{endpoint.rstrip('/')}/api/chat"
 
@@ -785,6 +782,20 @@ async def index():
     index_path = WEB_DIR / "index.html"
     with open(index_path, "r", encoding="utf-8") as f:
         return f.read()
+
+
+def _read_html_file(relative_name: str) -> str:
+    path = WEB_DIR / relative_name
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"{relative_name} が見つかりません")
+    return path.read_text(encoding="utf-8")
+
+
+@app.get("/settings", response_class=HTMLResponse)
+@app.get("/settings/", response_class=HTMLResponse)
+async def settings_page():
+    """設定ページ（末尾スラッシュ有無どちらでも）"""
+    return _read_html_file("settings.html")
 
 
 @app.get("/template-manager", response_class=HTMLResponse)
@@ -1194,6 +1205,10 @@ async def delete_template(template_name: str):
         return {"success": True, "deleted": template_name}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# 静的ファイルはページ・API ルートの後にマウント（ルート優先を確実にする）
+app.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
 
 
 # ========================================
